@@ -1,7 +1,7 @@
 {
   "name": "wab-wikipedia-search",
   "version": "2.0.0",
-  "description": "Web AppBuilder widget that allows the user to find articles on Wikipedia that are near a particular location.",
+  "description": "A Web AppBuilder widget that allows the user to map articles that are found via a keyword search.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
