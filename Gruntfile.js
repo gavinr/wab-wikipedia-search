@@ -5,6 +5,7 @@ module.exports = function (grunt) {
     grunt.loadNpmTasks('grunt-contrib-copy');
     grunt.loadNpmTasks('grunt-contrib-clean');
     grunt.loadNpmTasks('grunt-babel');
+    grunt.loadNpmTasks('grunt-gh-pages');
     var appDir = 'C:/code/WebAppBuilderForArcGIS/server/apps/2';
     var stemappDir = 'C:/code/WebAppBuilderForArcGIS/client/stemapp';
     grunt.initConfig({
@@ -79,7 +80,14 @@ module.exports = function (grunt) {
                 'expand': true
             }
         },
-        clean: { 'dist': { 'src': 'dist/**' } }
+        clean: { 'dist': { 'src': 'dist/**' } },
+        'gh-pages': {
+          options: {
+            base: 'demo'
+          },
+          src: ['**']
+        }
     });
     grunt.registerTask('default', ['watch']);
+    grunt.registerTask('deploy', ['gh-pages']);
 };
