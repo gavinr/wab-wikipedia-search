@@ -83,7 +83,8 @@ module.exports = function (grunt) {
         clean: { 'dist': { 'src': 'dist/**' } },
         'gh-pages': {
           options: {
-            base: 'demo'
+            base: 'demo',
+            dotfiles: true
           },
           src: ['**']
         }
