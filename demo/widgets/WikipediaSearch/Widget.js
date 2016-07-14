@@ -1,10 +1,11 @@
-define(['dojo/_base/declare', 'jimu/BaseWidget', 'esri/request', 'esri/geometry/Point', 'esri/symbols/SimpleMarkerSymbol', 'esri/symbols/SimpleLineSymbol', 'esri/InfoTemplate', 'esri/graphic', 'esri/layers/GraphicsLayer', 'esri/graphicsUtils', 'dojo/_base/Color', 'dojo/html', 'dijit/focus', 'dijit/_WidgetsInTemplateMixin', 'dijit/form/TextBox', 'dojox/form/BusyButton'], function (declare, BaseWidget, esriRequest, Point, SimpleMarkerSymbol, SimpleLineSymbol, InfoTemplate, Graphic, GraphicsLayer, graphicsUtils, Color, html, focusUtil, _WidgetsInTemplateMixin, TextBox, BusyButton) {
+define(['dojo/_base/declare', 'jimu/BaseWidget', 'esri/request', 'esri/geometry/Point', 'esri/symbols/SimpleMarkerSymbol', 'esri/symbols/SimpleLineSymbol', 'esri/InfoTemplate', 'esri/graphic', 'esri/layers/GraphicsLayer', 'esri/graphicsUtils', 'dojo/_base/Color', 'dojo/html', 'dijit/focus', 'dijit/_WidgetsInTemplateMixin', 'dijit/form/TextBox', 'dojox/form/BusyButton','esri/config'], function (declare, BaseWidget, esriRequest, Point, SimpleMarkerSymbol, SimpleLineSymbol, InfoTemplate, Graphic, GraphicsLayer, graphicsUtils, Color, html, focusUtil, _WidgetsInTemplateMixin, TextBox, BusyButton, esriConfig) {
   return declare([BaseWidget, _WidgetsInTemplateMixin], {
 
     baseClass: 'wikipedia-search',
 
     postCreate: function postCreate() {
       this.inherited(arguments);
+      esriConfig.request.corsEnabledServers.push('crossorigin.me');
       console.log('WikipediaSearch::postCreate');
     },
     searchButtonOnClick: function searchButtonOnClick() {
@@ -28,7 +29,7 @@ define(['dojo/_base/declare', 'jimu/BaseWidget', 'esri/request', 'esri/geometry/
     },
     wikipediaSearch: function wikipediaSearch(searchQuery) {
       var req = {
-        url: 'https://en.wikipedia.org/w/api.php',
+        url: 'https://crossorigin.me/https://en.wikipedia.org/w/api.php',
         content: {
           'action': 'opensearch',
           'search': searchQuery,
@@ -41,7 +42,7 @@ define(['dojo/_base/declare', 'jimu/BaseWidget', 'esri/request', 'esri/geometry/
     },
     getCoordsForArray: function getCoordsForArray(namesArr) {
       var req = {
-        url: 'https://en.wikipedia.org/w/api.php',
+        url: 'https://crossorigin.me/https://en.wikipedia.org/w/api.php',
         content: {
           'action': 'query',
           'prop': 'coordinates',
