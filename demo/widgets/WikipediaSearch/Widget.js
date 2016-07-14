@@ -5,7 +5,7 @@ define(['dojo/_base/declare', 'jimu/BaseWidget', 'esri/request', 'esri/geometry/
 
     postCreate: function postCreate() {
       this.inherited(arguments);
-      esriConfig.request.corsEnabledServers.push('crossorigin.me');
+      esriConfig.defaults.io.corsEnabledServers.push('crossorigin.me');
       console.log('WikipediaSearch::postCreate');
     },
     searchButtonOnClick: function searchButtonOnClick() {
