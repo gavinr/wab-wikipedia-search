@@ -5,7 +5,7 @@ define(['dojo/_base/declare', 'jimu/BaseWidget', 'esri/request', 'esri/geometry/
 
     postCreate: function postCreate() {
       this.inherited(arguments);
-      esriConfig.defaults.io.corsEnabledServers.push('crossorigin.me');
+      esriConfig.defaults.io.corsEnabledServers.push('cors-anywhere.herokuapp.com');
       console.log('WikipediaSearch::postCreate');
     },
     searchButtonOnClick: function searchButtonOnClick() {
@@ -29,7 +29,7 @@ define(['dojo/_base/declare', 'jimu/BaseWidget', 'esri/request', 'esri/geometry/
     },
     wikipediaSearch: function wikipediaSearch(searchQuery) {
       var req = {
-        url: 'https://crossorigin.me/https://en.wikipedia.org/w/api.php',
+        url: 'https://cors-anywhere.herokuapp.com/en.wikipedia.org/w/api.php',
         content: {
           'action': 'opensearch',
           'search': searchQuery,
@@ -42,7 +42,7 @@ define(['dojo/_base/declare', 'jimu/BaseWidget', 'esri/request', 'esri/geometry/
     },
     getCoordsForArray: function getCoordsForArray(namesArr) {
       var req = {
-        url: 'https://crossorigin.me/https://en.wikipedia.org/w/api.php',
+        url: 'https://cors-anywhere.herokuapp.com/en.wikipedia.org/w/api.php',
         content: {
           'action': 'query',
           'prop': 'coordinates',

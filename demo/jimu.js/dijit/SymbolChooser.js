@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////
-// Copyright © 2014 Esri. All Rights Reserved.
+// Copyright © 2014 - 2017 Esri. All Rights Reserved.
 //
 // Licensed under the Apache License Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,19 +32,22 @@ define([
   'jimu/symbolUtils',
   'esri/symbols/jsonUtils',
   'esri/symbols/SimpleMarkerSymbol',
+  'esri/symbols/PictureMarkerSymbol',
   'esri/symbols/SimpleLineSymbol',
   'esri/symbols/SimpleFillSymbol',
   'esri/symbols/TextSymbol',
   'esri/symbols/Font',
-  'dijit/form/Select',
-  'dijit/form/NumberSpinner',
+  'jimu/dijit/ImageChooser',
   'jimu/dijit/ColorPicker',
-  'jimu/dijit/_Transparency'
+  'jimu/dijit/_Transparency',
+  'dijit/form/Select',
+  'dijit/form/NumberSpinner'
 ],
 function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
   template, Evented, lang, html, array, on, has, query, xhr,
-  jimuUtils, jimuSymUtils, esriSymJsonUtils, SimpleMarkerSymbol,
-  SimpleLineSymbol, SimpleFillSymbol, TextSymbol, Font) {
+  jimuUtils, jimuSymUtils, esriSymJsonUtils, SimpleMarkerSymbol, PictureMarkerSymbol,
+  SimpleLineSymbol, SimpleFillSymbol, TextSymbol, Font, ImageChooser) {
+
   return declare([_WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin, Evented], {
     templateString:template,
     baseClass: 'jimu-symbol-chooser',
@@ -55,6 +58,7 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
     _fillEventBinded: false,
     _textEventBinded: false,
     _invokeSymbolChangeEvent: true,
+    _customPictureMarkerSymbol: null,
 
     //options:
     //you must set symbol or type
@@ -65,7 +69,8 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
     //reset
     //showBySymbol
     //showByType
-    //getSymbol
+    //getValidSymbol: Return a valid symbol. Return null if UI parameter is invalid.
+    //getSymbol: This method is deprecated. Pleause use getValidSymbol instead.
 
     //events:
     //change
@@ -73,10 +78,12 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
 
     postMixInProperties:function(){
       this.nls = window.jimuNls.symbolChooser;
+      this._setTemplateNls();
     },
 
     postCreate:function(){
       this.inherited(arguments);
+      this._initImageChooser();
       this.own(on(document.body, 'click', lang.hitch(this, this._onBodyClicked)));
       this._isIE8 = has('ie') === 8;
       if(this._isIE8){
@@ -150,20 +157,28 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
       }
     },
 
-    getSymbol:function(){
+    getSymbol: function(){
+      return this._getSymbol(false);
+    },
+
+    getValidSymbol: function(){
+      return this._getSymbol(true);
+    },
+
+    _getSymbol:function(/*optional*/ checkValidity){
       var symbol = null;
 
       if(this.type === 'marker'){
-        symbol = this._getPointSymbolBySetting();
+        symbol = this._getPointSymbolBySetting(checkValidity);
       }
       else if(this.type === 'line'){
-        symbol = this._getLineSymbolBySetting();
+        symbol = this._getLineSymbolBySetting(checkValidity);
       }
       else if(this.type === 'fill'){
-        symbol = this._getFillSymbolBySetting();
+        symbol = this._getFillSymbolBySetting(checkValidity);
       }
       else if(this.type === 'text'){
-        symbol = this._getTextSymbolBySetting();
+        symbol = this._getTextSymbolBySetting(checkValidity);
       }
 
       var result = null;
@@ -220,8 +235,8 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
       return jimuUtils.getAncestorDom(dom, checkFunc, maxLoop);
     },
 
-    _getAbsoluteUrl:function(module){
-      return window.location.protocol + "//" + window.location.host +  require.toUrl(module);
+    _getAbsoluteUrl:function(moduleName){
+      return window.location.protocol + "//" + window.location.host +  require.toUrl(moduleName);
     },
 
     _cloneSymbol:function(symbol){
@@ -340,12 +355,10 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
       }
 
       if(this.isPictureMarkerSymbol(this.symbol)){
-        this._showPictureMarkerSymSettings();
-      }
-      else if(this.isSimpleMarkerSymbol(this.symbol)){
+        this._showBuildInPictureMarkerSymSettings();
+      }else if(this.isSimpleMarkerSymbol(this.symbol)){
         this._showSimpleMarkerSymSettings();
-      }
-      else{
+      }else{
         var args = {
           "style": "esriSMSCircle",
           "color": [0, 0, 128, 128],
@@ -365,16 +378,8 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
     },
 
     _bindPointEvents:function(){
-      this.own(
-        on(this.pointIconTables,
-          '.symbol-div-item:click',
-          lang.hitch(this, this._onPointSymIconItemClick))
-      );
-      this.own(
-        on(this.pointSymClassSelect,
-          'Change',
-          lang.hitch(this, this._onPointSymClassSelectChange))
-      );
+      this.own(on(this.pointIconTables, '.symbol-div-item:click', lang.hitch(this, this._onPointSymIconItemClick)));
+      this.own(on(this.pointSymClassSelect, 'change', lang.hitch(this, this._onPointSymClassSelectChange)));
       this.own(on(this.pointSize, 'change', lang.hitch(this, this._onPointSymbolChange)));
       this.own(on(this.pointColor, 'change', lang.hitch(this, this._onPointSymbolChange)));
       this.own(on(this.pointAlpha, 'change', lang.hitch(this, this._onPointSymbolChange)));
@@ -405,8 +410,7 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
           this.pointOutlineColor.setColor(outlineSymbol.color);
           this.pointOutlineWidth.set('value', parseFloat(outlineSymbol.width.toFixed(0)));
         }
-      }
-      else if(this.isPictureMarkerSymbol(symbol)){
+      }else if(this.isPictureMarkerSymbol(symbol)){
         this.pointSize.set('value', symbol.width);
       }
       this._invokeSymbolChangeEvent = true;
@@ -420,19 +424,39 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
       return symbol && symbol.declaredClass === 'esri.symbol.PictureMarkerSymbol';
     },
 
+    _isCustomImageOptionSelected: function(){
+      return this.pointSymClassSelect.get('value') === 'custom';
+    },
+
     _onPointSymClassSelectChange:function(){
-      this._showSelectedPointSymIconTable();
-      var fileName = this.pointSymClassSelect.get('value');
-      var defName = 'def' + fileName;
-      var def = this.pointSymClassSelect[defName];
-      if (!def) {
-        this._requestPointSymJson(fileName);
+      if(this._isCustomImageOptionSelected()){
+        this._showCustomPictureMarkerSymSettings();
+        if(this._customPictureMarkerSymbol){
+          this.symbol = this._customPictureMarkerSymbol;
+          this._onPointSymbolChange();
+        }
+      }else{
+        this._showSimpleMarkerSymSettings();
+        this._showSelectedPointSymIconTable();
+        var fileName = this.pointSymClassSelect.get('value');
+        var defName = 'def' + fileName;
+        var def = this.pointSymClassSelect[defName];
+        if (!def) {
+          this._requestPointSymJson(fileName);
+        }
+        var option = this.pointSymClassSelect.getOptions(fileName);
+        var label = option ? option.label : "";
+        this.pointSymClassSelect.domNode.title = label;
       }
     },
 
-    _showSelectedPointSymIconTable:function(){
-      var fileName = this.pointSymClassSelect.get('value');
+    _hideAllPointSymIconTable: function(){
       query('.marker-icon-table', this.pointIconTables).style('display', 'none');
+    },
+
+    _showSelectedPointSymIconTable:function(){
+      this._hideAllPointSymIconTable();
+      var fileName = this.pointSymClassSelect.get('value');
       var tables = query('.marker-icon-table-' + fileName, this.pointIconTables);
       if (tables.length > 0) {
         tables.style('display', 'table');
@@ -487,9 +511,8 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
       var oldColorTrDisplay = html.getStyle(this.pointColorTr, 'display');
       if(this.isSimpleMarkerSymbol(this.symbol)){
         this._showSimpleMarkerSymSettings();
-      }
-      else{
-        this._showPictureMarkerSymSettings();
+      }else{
+        this._showBuildInPictureMarkerSymSettings();
       }
       this._onPointSymbolChange();
       var newColorTrDisplay = html.getStyle(this.pointColorTr, 'display');
@@ -499,25 +522,50 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
     },
 
     _showSimpleMarkerSymSettings:function(){
-      html.setStyle(this.pointColorTr, 'display', '');
-      html.setStyle(this.pointOpacityTr, 'display', '');
-      html.setStyle(this.pointOutlineColorTr, 'display', '');
-      html.setStyle(this.pointOulineWidthTr, 'display', '');
+      html.addClass(this.pointCustomImageTr, 'hidden');
+      html.removeClass(this.pointIconTablesTr, 'hidden');
+      html.removeClass(this.pointColorTr, 'hidden');
+      html.removeClass(this.pointOpacityTr, 'hidden');
+      html.removeClass(this.pointOutlineColorTr, 'hidden');
+      html.removeClass(this.pointOulineWidthTr, 'hidden');
     },
 
-    _showPictureMarkerSymSettings:function(){
-      html.setStyle(this.pointColorTr, 'display', 'none');
-      html.setStyle(this.pointOpacityTr, 'display', 'none');
-      html.setStyle(this.pointOutlineColorTr, 'display', 'none');
-      html.setStyle(this.pointOulineWidthTr, 'display', 'none');
+    _showBuildInPictureMarkerSymSettings:function(){
+      html.addClass(this.pointCustomImageTr, 'hidden');
+      html.removeClass(this.pointIconTablesTr, 'hidden');
+      html.addClass(this.pointColorTr, 'hidden');
+      html.addClass(this.pointOpacityTr, 'hidden');
+      html.addClass(this.pointOutlineColorTr, 'hidden');
+      html.addClass(this.pointOulineWidthTr, 'hidden');
     },
 
-    _getPointSymbolBySetting:function(){
+    _showCustomPictureMarkerSymSettings: function(){
+      html.removeClass(this.pointCustomImageTr, 'hidden');
+      html.addClass(this.pointIconTablesTr, 'hidden');
+      html.addClass(this.pointColorTr, 'hidden');
+      html.addClass(this.pointOpacityTr, 'hidden');
+      html.addClass(this.pointOutlineColorTr, 'hidden');
+      html.addClass(this.pointOulineWidthTr, 'hidden');
+    },
+
+    _getPointSymbolBySetting:function(checkValidity){
       if(!this.symbol){
         return null;
       }
+
+      if(checkValidity){
+        if(!this.pointSize.validate()){
+          return null;
+        }
+      }
+
       var size = parseFloat(this.pointSize.get('value'));
       if(this.isSimpleMarkerSymbol(this.symbol)){
+        if(checkValidity){
+          if(!this.pointOutlineWidth.validate()){
+            return null;
+          }
+        }
         this.symbol.setSize(size);
         var color = this.pointColor.getColor();
         var opacity = this.pointAlpha.getAlpha(); //parseFloat(this.pointAlpha.get('value'));
@@ -537,6 +585,41 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
       }
       this._updatePreview(this.pointSymPreview);
       return this.symbol;
+    },
+
+    _initImageChooser: function(){
+      this.imageChooser = new ImageChooser({
+        cropImage: false,
+        showSelfImg: false,
+        goldenWidth: 16,
+        goldenHeight: 16,
+        format: ['image/gif','image/png','image/jpeg'],
+        label: this.nls.chooseFile
+      });
+      html.addClass(this.imageChooser.domNode, 'custom-image-chooser');
+      this.own(on(this.imageChooser, 'change', lang.hitch(this, this._onImageChange)));
+      this.imageChooser.placeAt(this.customImageTd, "first");
+    },
+
+    _onImageChange: function(imageData, fileProperty){
+      this.imageNameNode.innerHTML = fileProperty.fileName;
+      imageData = imageData.replace(/^data:image\/.*;base64,/,"");
+      var size = parseFloat(this.pointSize.get('value'));
+      var args = {
+        "type" : "esriPMS",
+        "url" : null,
+        "imageData" : imageData,
+        "contentType" : "image/png",
+        "color" : null,
+        "width" : size,
+        "height" : size,
+        "angle" : 0,
+        "xoffset" : 0,
+        "yoffset" : 0
+      };
+      this.symbol =  new PictureMarkerSymbol(args);
+      this._customPictureMarkerSymbol = this.symbol;
+      this._onPointSymbolChange();
     },
 
     /* line section */
@@ -634,7 +717,12 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
       this._onLineSymbolChange();
     },
 
-    _getLineSymbolBySetting:function(){
+    _getLineSymbolBySetting:function(checkValidity){
+      if(checkValidity){
+        if(!this.lineWidth.validate()){
+          return null;
+        }
+      }
       this.symbol = new SimpleLineSymbol();
       var color = this.lineColor.getColor();
       var style = this.lineStylesSelect.get('value');
@@ -742,7 +830,12 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
       this._onFillSymbolChange();
     },
 
-    _getFillSymbolBySetting:function(){
+    _getFillSymbolBySetting:function(checkValidity){
+      if(checkValidity){
+        if(!this.fillOutlineWidth.validate()){
+          return null;
+        }
+      }
       this.symbol = new SimpleFillSymbol();
       var color = this.fillColor.getColor();
       color.a = this.fillAlpha.getAlpha();//parseFloat(this.fillAlpha.get('value').toFixed(2));
@@ -801,29 +894,62 @@ function(declare, _WidgetBase, _TemplatedMixin, _WidgetsInTemplateMixin,
       return symbol && symbol.declaredClass === 'esri.symbol.TextSymbol';
     },
 
-    _updateTextPreview:function(){
+    _updateTextPreview:function(fontFamily){
       var colorHex = this.textColor.getColor().toHex();
       var size = parseInt(this.textFontSize.get('value'), 10) + 'px';
       html.setStyle(this.textPreview, {
         color: colorHex,
-        fontSize: size
+        fontSize: size,
+        fontFamily: fontFamily
       });
       this.textPreview.innerHTML = this.inputText.value;
     },
 
-    _getTextSymbolBySetting:function(){
+    _getTextSymbolBySetting:function(checkValidity){
+      if(checkValidity){
+        if(!this.textFontSize.validate()){
+          return null;
+        }
+      }
       this.symbol = new TextSymbol();
       var text = this.inputText.value;
       var color = this.textColor.getColor();
       var size = parseInt(this.textFontSize.get('value'), 10);
-      var font = new Font();
+      var font = new Font();// Default font family : Serif
       font.setSize(size);
       this.symbol.setText(text);
       this.symbol.setColor(color);
       this.symbol.setFont(font);
-      this._updateTextPreview();
+      this._updateTextPreview(font.family);
       return this.symbol;
-    }
+    },
 
+    _setTemplateNls: function () {
+      //TODO should be delete when nls added
+      if ("undefined" === typeof this.nls.damage) {
+        this.nls.damage = "Damage";
+      }
+      if ("undefined" === typeof this.nls.disasters) {
+        this.nls.disasters = "Disasters";
+      }
+      if ("undefined" === typeof this.nls.emergencyManagement) {
+        this.nls.emergencyManagement = "Emergency Management";
+      }
+      if ("undefined" === typeof this.nls.generalInfrastructure) {
+        this.nls.generalInfrastructure = "General Infrastructure";
+      }
+      if ("undefined" === typeof this.nls.localGovernment) {
+        this.nls.localGovernment = "Local Government";
+      }
+      if ("undefined" === typeof this.nls.numbers) {
+        this.nls.numbers = "Numbers";
+      }
+      if ("undefined" === typeof this.nls.pointsOfInterest) {
+        this.nls.pointsOfInterest = "Points of Interest";
+      }
+      if ("undefined" === typeof this.nls.stateGovernment) {
+        this.nls.stateGovernment = "State Government";
+      }
+    }
   });
 });

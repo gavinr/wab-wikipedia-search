@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////
-// Copyright © 2014 Esri. All Rights Reserved.
+// Copyright © 2014 - 2017 Esri. All Rights Reserved.
 //
 // Licensed under the Apache License Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,9 @@
 // limitations under the License.
 ///////////////////////////////////////////////////////////////////////////
 
-define(['dojo/_base/declare',
+define([
+    'dojo/Evented',
+    'dojo/_base/declare',
     'dijit/_WidgetBase',
     'dijit/_TemplatedMixin',
     'dojo/_base/lang',
@@ -22,7 +24,6 @@ define(['dojo/_base/declare',
     'dojo/on',
     'dojo/text!./templates/ImageChooser.html',
     'dojo/sniff',
-    'dojo/request',
     'esri/lang',
     '../utils',
     './_CropImage',
@@ -30,21 +31,22 @@ define(['dojo/_base/declare',
     'jimu/dijit/Message',
     'jimu/dijit/LoadingShelter'
   ],
-  function(declare, _WidgetBase, _TemplatedMixin, lang, html,
-    on, template, has, request, esriLang, utils, _CropImage,
+  function(Evented, declare, _WidgetBase, _TemplatedMixin, lang, html,
+    on, template, has, esriLang, utils, _CropImage,
     Popup, Message, LoadingShelter) {
     var count = 0;
 
     //summary:
     //  popup the image file chooser dialog, when choose an image file,
     //  display the image file and return the image's base64 code
-    var ic = declare([_WidgetBase, _TemplatedMixin], {
+    var ic = declare([_WidgetBase, _TemplatedMixin, Evented], {
       templateString: template,
       declaredClass: "jimu.dijit.ImageChooser",
 
       // public properties
       cropImage: true, // if imagechooser run in integration ignore this property
       displayImg: null,
+      stretchImg: true,//default stretch img in old version
       defaultSelfSrc: null,
       showSelfImg: false,
       label: null,
@@ -109,19 +111,25 @@ define(['dojo/_base/declare',
       },
 
       _initial: function() {
+        this._initFileForm();
         this._processProperties();
-        this._porcessMaskClick();
-        this._setupFileInput();
         this._addTip();
       },
 
       _processProperties: function() {
+        this.fileProperty = {};
+
         if (this.label && typeof this.label === 'string') {
           this.displayText.innerHTML = this.label;
           html.setStyle(this.hintText, 'display', 'block');
         }
         if (this.showSelfImg) {
           html.setStyle(this.hintImage, 'display', 'block');
+        }
+        if (false === this.stretchImg) {
+          html.addClass(this.selfImg, "no-stretch-img");//set false by manual
+        } else {
+          html.removeClass(this.selfImg, "no-stretch-img");//default
         }
         if (this.defaultSelfSrc) {
           this.selfImg.src = this.defaultSelfSrc;
@@ -156,7 +164,7 @@ define(['dojo/_base/declare',
         html.setAttr(this.fileInput, 'id', 'imageChooser_' + count);
         html.setAttr(this.mask, 'for', 'imageChooser_' + count);
         count++;
-        this.maskHandle = on(this.mask, 'click', lang.hitch(this, function(evt) {
+        on.once(this.mask, 'click', lang.hitch(this, function(evt) {
           evt.stopPropagation();
           if (has('safari') && has('safari') < 7) {
             new Message({
@@ -208,81 +216,82 @@ define(['dojo/_base/declare',
         }
       },
 
-      _setupFileInput: function() {
-        if (has('ie') <= 9) {
-          this.own(on(this.fileInput, 'change', lang.hitch(this, this._onFileInputChange)));
-        } else {
-          on.once(this.fileInput, 'change', lang.hitch(this, this._onFileInputChange));
-        }
-      },
+      // _setupFileInput: function() {
+      //   if (has('ie') <= 9) {
+      //     this.own(on(this.fileInput, 'change', lang.hitch(this, this._onFileInputChange)));
+      //   } else {
+      //     on.once(this.fileInput, 'change', lang.hitch(this, this._onFileInputChange));
+      //   }
+      // },
 
-      _onFileInputChange: function(evt) {
+      _onFileInputChange: function (evt) {
         var file = (evt.target.files && evt.target.files[0]) || (evt.files && evt.files[0]);
         if (this.format && this.format.indexOf(file.type) === -1) {
           new Message({
             'message': this.nls.invalidType
           });
 
-          if (!has('ie') || has('ie') > 9) {
-            // recreate fileForm to support select same image again.
-            this._recreateFileForm();
-          }
+          this._initFileForm();//recreate fileForm to support select same image again.
           return;
         }
 
-        var maxSize = has('ie') < 9 ? 23552 : this.maxSize * 1024; //ie8:21k others:1M
-        utils.file.readFile(
-          evt,
-          'image/*',
-          maxSize,
-          lang.hitch(this, function(err, fileName, fileData) {
-            /*jshint unused: false*/
-            if (err) {
-              var message = this.nls[err.errCode];
-              if (err.errCode === 'exceed') {
-                message = message.replace('1024', maxSize / 1024);
-              }
-              new Message({
-                'message': message
-              });
+        var maxSize = this.maxSize * 1024;
+        utils.file.readFile(evt, 'image/*', maxSize, lang.hitch(this, function (err, fileName, fileData) {
+          /*jshint unused: false*/
+          if (err) {
+            var message = this.nls[err.errCode];
+            if (err.errCode === 'exceed') {
+              message = message.replace('1024', maxSize / 1024);
+            }
+            new Message({
+              'message': message
+            });
+          } else {
+            this.fileProperty.fileName = fileName;
+            if (this.cropImage && file.type !== 'image/gif') {
+              this._cropImageByUser(fileData, file.type);
             } else {
-              if (window.isXT && this.cropImage && file.type !== 'image/gif') {
-                this._cropImageByUser(fileData);
-              } else {
-                this._readFileData(fileData);
-              }
+              this._readFileData(fileData);
             }
+          }
 
-            if (!has('ie') || has('ie') > 9) {
-              // recreate fileForm to support select same image again.
-              this._recreateFileForm();
-            }
-          }));
+          this._initFileForm();//recreate fileForm to support select same image again.
+        }));
       },
 
-      _recreateFileForm: function() {
-        var newMask = lang.clone(this.mask);
-        var newFileInput = lang.clone(this.fileInput);
-        html.destroy(this.mask);
-        html.destroy(this.fileInput);
+      _initFileForm: function () {
+        //clean
+        if (this.mask) {
+          html.destroy(this.mask);
+        }
+        if (this.fileInput) {
+          html.destroy(this.fileInput);
+        }
+        if (this.fileForm) {
+          html.destroy(this.fileForm);
+        }
+        //create
+        // <form data-dojo-attach-point="fileForm">
+        //   <label data-dojo-attach-point="mask"></label>
+        //   <input type="file" data-dojo-attach-point="fileInput">
+        // </form>
+        this.fileForm = html.create('form', {
+          "data-dojo-attach-point": "fileForm"
+        }, this.domNode);
+        this.mask = html.create('label', {
+          "data-dojo-attach-point": "mask"
+        }, this.fileForm);
+        this.fileInput = html.create('input', {
+          "type": "file",
+          "data-dojo-attach-point": "fileInput"
+        }, this.fileForm);
 
-        var newFileForm = lang.clone(this.fileForm);
-        html.place(newMask, newFileForm);
-        html.place(newFileInput, newFileForm);
-        html.place(newFileForm, this.fileForm, 'replace');
-
-        this.maskHandle.remove();
-        this.mask = newMask;
-        this.fileInput = newFileInput;
-        html.destroy(this.fileForm);
-        this.fileForm = newFileForm;
-
-        this._porcessMaskClick();
-        this._setupFileInput();
+        this._porcessMaskClick();//masker event
+        on.once(this.fileInput, 'change', lang.hitch(this, this._onFileInputChange));//fileInput event
       },
 
       _readFileData: function(fileData) {
-        this.onImageChange(fileData);
+        this.onImageChange(fileData, this.fileProperty);
         if (this.displayImg) {
           html.setAttr(this.displayImg, 'src', fileData);
         }
@@ -292,62 +301,44 @@ define(['dojo/_base/declare',
           } else {
             this.selfImg.src = fileData;
           }
+          //Center&Vertically
+          var layoutBox = html.getMarginBox(this.hintImage);
+          if (layoutBox && layoutBox.w && layoutBox.h) {
+            html.style(this.selfImg, "maxWidth", layoutBox.w + "px");
+            html.style(this.selfImg, "maxHeight", layoutBox.h + "px");
+          }
         }
       },
 
-      _cropImageByUser: function(fileData) {
+      _cropImageByUser: function (data, type) {
         var cropImage = new _CropImage({
-          imageSrc: fileData,
+          imageSrc: data,
+          type: type,
           nls: lang.clone(this.nls),
-          realWidth: this.goldenWidth,
-          realHeight: this.goldenHeight
+          goldenWidth: this.goldenWidth,
+          goldenHeight: this.goldenHeight
         });
 
         var shelter = new LoadingShelter({
           hidden: true
         });
         var cropPopup = new Popup({
-          titleLabel: 'Crop Image',
+          titleLabel: this.nls.cropImage,
           content: cropImage,
           // autoHeight: true,
           width: 500,
           height: 480,
           buttons: [{
             label: this.nls.common.ok,
-            onClick: lang.hitch(this, function() {
-              var imageSize = cropImage.getImageSize();
-              var cropSize = cropImage.getCropSize();
+            onClick: lang.hitch(this, function () {
               shelter.show();
-              request("/webappbuilder/rest/cropimage", {
-                data: {
-                  imageData: fileData,
-                  imageDisplaySize: imageSize.w + ',' + imageSize.h,
-                  cropRectangle: cropSize.w + ',' + cropSize.h + ',' + cropSize.t + ',' + cropSize.l
-                },
-                method: 'POST',
-                handleAs: 'json',
-                headers: {
-                  "X-Requested-With": null
-                }
-              }).then(lang.hitch(this, function(response) {
-                if (response.success) {
-                  var fileData = response.imageData;
-                  this._readFileData(fileData);
-                  cropPopup.close();
-                } else {
-                  new Message({
-                    'message': this.nls.unknowError
-                  });
 
-                  shelter.hide();
-                }
-              }), lang.hitch(this, function(err) {
-                console.error(err);
-                new Message({
-                  'message': this.nls.unknowError
-                });
-                shelter.hide();
-              }));
+              var fileData = cropImage.getData();
+              this._readFileData(fileData);
+              cropPopup.close();
+
+              cropImage.destroy();
+              shelter.hide();
             })
           }]
         });
@@ -359,6 +350,8 @@ define(['dojo/_base/declare',
 
       onImageChange: function(fileData) {
         this.imageData = fileData;
+        this.emit("imageChange", this.imageData, this.fileProperty);
+        this.emit("change", this.imageData, this.fileProperty);
       }
     });
 

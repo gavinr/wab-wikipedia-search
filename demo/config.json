@@ -11,16 +11,21 @@
       "red",
       "yellow"
     ],
-    "version": "2.0.1"
+    "version": "2.7",
+    "sharedTheme": {
+      "isPortalSupport": true,
+      "useHeader": false,
+      "useLogo": false
+    }
   },
-  "portalUrl": "http://ps-dbs.maps.arcgis.com",
+  "portalUrl": "https://ps-dbs.maps.arcgis.com",
   "appId": "",
   "authorizedCrossOriginDomains": [],
-  "title": "Wikipedia Search Widget Demo",
-  "subtitle": "",
+  "title": "Wikipedia Search",
+  "subtitle": "with Web AppBuilder for ArcGIS",
   "keepAppState": true,
   "logo": "images/app-logo.png",
-  "geometryService": "http://utility.arcgisonline.com/arcgis/rest/services/Geometry/GeometryServer",
+  "geometryService": "https://utility.arcgisonline.com/arcgis/rest/services/Geometry/GeometryServer",
   "links": [],
   "widgetOnScreen": {
     "widgets": [
@@ -33,10 +38,9 @@
           "height": 40,
           "relativeTo": "browser"
         },
-        "version": "2.0.1",
+        "version": "2.7",
         "id": "themes_FoldableTheme_widgets_HeaderController_Widget_1",
-        "name": "HeaderController",
-        "label": "Header Controller"
+        "name": "HeaderController"
       },
       {
         "uri": "widgets/Scalebar/Widget",
@@ -45,10 +49,9 @@
           "bottom": 25,
           "relativeTo": "map"
         },
-        "version": "2.0.1",
+        "version": "2.7",
         "id": "widgets_Scalebar_Widget_2",
-        "name": "Scalebar",
-        "label": "Scalebar"
+        "name": "Scalebar"
       },
       {
         "uri": "widgets/Search/Widget",
@@ -57,11 +60,9 @@
           "top": 5,
           "relativeTo": "map"
         },
-        "version": "2.0.1",
+        "version": "2.7",
         "id": "widgets_Search_Widget_3",
-        "name": "Search",
-        "label": "Search",
-        "visible": false
+        "name": "Search"
       },
       {
         "uri": "widgets/Coordinate/Widget",
@@ -70,10 +71,9 @@
           "bottom": 5,
           "relativeTo": "map"
         },
-        "version": "2.0.1",
+        "version": "2.7",
         "id": "widgets_Coordinate_Widget_4",
-        "name": "Coordinate",
-        "label": "Coordinate"
+        "name": "Coordinate"
       },
       {
         "position": {
@@ -84,11 +84,10 @@
         "placeholderIndex": 1,
         "id": "_5",
         "name": "WikipediaSearch",
-        "label": "Wikipedia Search",
-        "version": "0.0.1",
-        "IsController": false,
+        "version": "2.0.0",
+        "closeable": true,
         "uri": "widgets/WikipediaSearch/Widget",
-        "config": "configs/WikipediaSearch/config_Wikipedia Search.json"
+        "openAtStart": true
       },
       {
         "position": {
@@ -134,10 +133,9 @@
           "zIndex": 1,
           "relativeTo": "map"
         },
-        "version": "2.0.1",
+        "version": "2.7",
         "id": "widgets_OverviewMap_Widget_10",
-        "name": "OverviewMap",
-        "label": "Overview Map"
+        "name": "OverviewMap"
       },
       {
         "uri": "widgets/HomeButton/Widget",
@@ -146,10 +144,9 @@
           "top": 75,
           "relativeTo": "map"
         },
-        "version": "2.0.1",
+        "version": "2.7",
         "id": "widgets_HomeButton_Widget_11",
-        "name": "HomeButton",
-        "label": "Home"
+        "name": "HomeButton"
       },
       {
         "uri": "widgets/MyLocation/Widget",
@@ -158,21 +155,18 @@
           "top": 110,
           "relativeTo": "map"
         },
-        "version": "2.0.1",
+        "version": "2.7",
         "id": "widgets_MyLocation_Widget_12",
-        "name": "MyLocation",
-        "label": "My Location",
-        "visible": false
+        "name": "MyLocation"
       },
       {
         "uri": "widgets/AttributeTable/Widget",
         "position": {
           "relativeTo": "browser"
         },
-        "version": "2.0.1",
+        "version": "2.7",
         "id": "widgets_AttributeTable_Widget_13",
-        "name": "AttributeTable",
-        "label": "Attribute Table"
+        "name": "AttributeTable"
       },
       {
         "uri": "widgets/Splash/Widget",
@@ -180,10 +174,9 @@
         "position": {
           "relativeTo": "browser"
         },
-        "version": "2.0.1",
+        "version": "2.7",
         "id": "widgets_Splash_Widget_14",
-        "name": "Splash",
-        "label": "Splash"
+        "name": "Splash"
       },
       {
         "uri": "widgets/ZoomSlider/Widget",
@@ -192,10 +185,33 @@
           "left": 7,
           "relativeTo": "map"
         },
-        "version": "2.0.1",
+        "version": "2.7",
         "id": "widgets_ZoomSlider_Widget_15",
-        "name": "ZoomSlider",
-        "label": "Zoom Slider"
+        "name": "ZoomSlider"
+      },
+      {
+        "uri": "widgets/ExtentNavigate/Widget",
+        "visible": false,
+        "position": {
+          "top": 150,
+          "left": 7,
+          "relativeTo": "map"
+        },
+        "id": "widgets_ExtentNavigate_Widget_16",
+        "name": "ExtentNavigate",
+        "version": "2.7"
+      },
+      {
+        "uri": "widgets/FullScreen/Widget",
+        "visible": false,
+        "position": {
+          "right": 8,
+          "top": 8,
+          "relativeTo": "map"
+        },
+        "version": "2.7",
+        "id": "widgets_FullScreen_Widget_17",
+        "name": "FullScreen"
       }
     ],
     "panel": {
@@ -214,21 +230,21 @@
       "right": 0,
       "bottom": 0
     },
-    "itemId": "6e03e8c26aad4b9c92a87c1063ddb0e3",
+    "itemId": "588f0e0acc514c11bc7c898fed9fc651",
     "mapOptions": {
       "extent": {
         "type": "extent",
-        "xmin": -14519401.184164235,
-        "ymin": 2107311.265018063,
-        "xmax": -7005335.555619522,
-        "ymax": 6607861.19717914,
+        "xmin": -14999999.999997716,
+        "ymin": 2699999.9999995646,
+        "xmax": -6199999.9999990575,
+        "ymax": 6499999.999998663,
         "spatialReference": {
           "wkid": 102100
         }
       }
     },
     "id": "map",
-    "portalUrl": "http://ps-dbs.maps.arcgis.com/"
+    "portalUrl": "https://ps-dbs.maps.arcgis.com/"
   },
   "widgetPool": {
     "panel": {
@@ -276,7 +292,7 @@
       "height": 29
     }
   },
-  "wabVersion": "2.0.1",
+  "wabVersion": "2.7",
   "isTemplateApp": true,
   "isWebTier": false,
   "httpProxy": {
@@ -284,5 +300,9 @@
     "alwaysUseProxy": false,
     "url": "",
     "rules": []
+  },
+  "dataSource": {
+    "dataSources": {},
+    "settings": {}
   }
 }

@@ -4,9 +4,6 @@
 .jimu-widget-header-controller .jimu-subtitle{
   color: #eed6ef;
 }
-.jimu-widget-header-controller .links .jimu-link{
-  color: #eed6ef;
-}
 .jimu-widget-header-controller .icon-node{
   border-right: 1px solid #904f93;
 }
@@ -30,10 +27,6 @@
 .jimu-foldable-panel>.jimu-panel-title,
 .jimu-title-panel>.title{
   background-color: #aa6fad;
-}
-.foldable-widget-frame>.title{
-	color: #eed6ef;
-	background-color: #be87c1;
 }
 
 .esriPopup .titlePane {

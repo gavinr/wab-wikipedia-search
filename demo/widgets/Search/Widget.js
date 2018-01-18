@@ -34,18 +34,21 @@ define([
     'esri/layers/FeatureLayer',
     'esri/InfoTemplate',
     'esri/lang',
+    'esri/tasks/query',
     './utils',
     'dojo/NodeList-dom'
   ],
   function(declare, lang, array, html, when, on, aspect, query, keys, Deferred, all,
     BaseWidget, LayerInfos, jimuUtils, Search, Locator,
-    FeatureLayer, InfoTemplate, esriLang, utils) {
+    FeatureLayer, InfoTemplate, esriLang, FeatureQuery, utils) {
     //To create a widget, you need to derive from BaseWidget.
     return declare([BaseWidget], {
       name: 'Search',
       baseClass: 'jimu-widget-search',
       searchDijit: null,
       searchResults: null,
+
+      _startWidth: null,
 
       postCreate: function() {
         if (this.closeable || !this.isOnScreen) {
@@ -65,6 +68,10 @@ define([
         LayerInfos.getInstance(this.map, this.map.itemInfo)
           .then(lang.hitch(this, function(layerInfosObj) {
             this.layerInfosObj = layerInfosObj;
+            this.own(this.layerInfosObj.on(
+            'layerInfosFilterChanged',
+            lang.hitch(this, this.onLayerInfosFilterChanged)));
+
             utils.setMap(this.map);
             utils.setLayerInfosObj(this.layerInfosObj);
             utils.setAppConfig(this.appConfig);
@@ -146,6 +153,7 @@ define([
               this.own(
                 on(this.searchDijit, 'clear-search', lang.hitch(this, '_onClearSearch'))
               );
+              /*
               this.own(
                 aspect.after(this.map.infoWindow, 'show', lang.hitch(this, function() {
                   if (this.searchDijit &&
@@ -166,6 +174,7 @@ define([
                   }
                 }))
               );
+              */
 
               this.fetchData('framework');
             }));
@@ -179,13 +188,25 @@ define([
         }
       },
 
-      setPosition: function() {
-        this._resetSearchDijitStyle();
+      setPosition: function(position) {
+        this._resetSearchDijitStyle(position);
         this.inherited(arguments);
       },
 
       resize: function() {
         this._resetSearchDijitStyle();
+      },
+
+      onLayerInfosFilterChanged: function(changedLayerInfos) {
+        array.some(changedLayerInfos, lang.hitch(this, function(info) {
+          if (this.searchDijit && this.searchDijit.sources && this.searchDijit.sources.length > 0) {
+            array.forEach(this.searchDijit.sources, function(s) {
+              if (s._featureLayerId === info.id) {
+                s.featureLayer.setDefinitionExpression(info.getFilter());
+              }
+            });
+          }
+        }));
       },
 
       _resetSearchDijitStyle: function() {
@@ -196,10 +217,9 @@ define([
 
         setTimeout(lang.hitch(this, function() {
           if (this.searchDijit && this.searchDijit.domNode) {
-            // only need width of domNode
-            // var box = html.getMarginBox(this.domNode);
             var box = {
-              w: parseInt(html.getComputedStyle(this.domNode).width, 10)
+              w: !window.appInfo.isRunInMobile ? 274 : // original width of search dijit
+                parseInt(html.getComputedStyle(this.domNode).width, 10)
             };
             var sourcesBox = html.getMarginBox(this.searchDijit.sourcesBtnNode);
             var submitBox = html.getMarginBox(this.searchDijit.submitNode);
@@ -238,7 +258,7 @@ define([
         var sourceDefs = array.map(config.sources, lang.hitch(this, function(source) {
           var def = new Deferred();
           if (source && source.url && source.type === 'locator') {
-            def.resolve({
+            var _source = {
               locator: new Locator(source.url || ""),
               outFields: ["*"],
               singleLineFieldName: source.singleLineFieldName || "",
@@ -248,12 +268,17 @@ define([
               maxSuggestions: source.maxSuggestions,
               maxResults: source.maxResults || 6,
               zoomScale: source.zoomScale || 50000,
-              useMapExtent: !!source.searchInCurrentMapExtent,
-              localSearchOptions: {
-                minScale: 300000,
-                distance: 50000
-              }
-            });
+              useMapExtent: !!source.searchInCurrentMapExtent
+            };
+
+            if (source.enableLocalSearch) {
+              _source.localSearchOptions = {
+                minScale: source.localSearchMinScale,
+                distance: source.localSearchDistance
+              };
+            }
+
+            def.resolve(_source);
           } else if (source && source.url && source.type === 'query') {
             var searchLayer = new FeatureLayer(source.url || null, {
               outFields: ["*"]
@@ -261,7 +286,26 @@ define([
 
             this.own(on(searchLayer, 'load', lang.hitch(this, function(result) {
               var flayer = result.layer;
-              var template = this._getInfoTemplate(flayer, source, source.displayField);
+
+              // identify the data source
+              var sourceLayer = this.map.getLayer(source.layerId);
+              var sourceLayerInfo = this.layerInfosObj.getLayerInfoById(source.layerId);
+              var showInfoWindowOnSelect;
+              var enableInfoWindow;
+              if(sourceLayer) {
+                // pure feature service layer defined in the map
+                showInfoWindowOnSelect = false;
+                enableInfoWindow = false;
+              } else if (sourceLayerInfo){
+                // feature service layer defined in the map
+                showInfoWindowOnSelect = false;
+                enableInfoWindow = false;
+              } else {
+                // data source from the outside
+                showInfoWindowOnSelect = true;
+                enableInfoWindow = true;
+              }
+
               var fNames = null;
               if (source.searchFields && source.searchFields.length > 0) {
                 fNames = source.searchFields;
@@ -274,6 +318,7 @@ define([
                   }
                 });
               }
+
               var convertedSource = {
                 featureLayer: flayer,
                 outFields: ["*"],
@@ -285,14 +330,32 @@ define([
                 maxSuggestions: source.maxSuggestions || 6,
                 maxResults: source.maxResults || 6,
                 zoomScale: source.zoomScale || 50000,
-                infoTemplate: template,
+                //infoTemplate: lang.clone(template),
                 useMapExtent: !!source.searchInCurrentMapExtent,
+                showInfoWindowOnSelect: showInfoWindowOnSelect,
+                enableInfoWindow: enableInfoWindow,
                 _featureLayerId: source.layerId
               };
+              /*
               if (!template) {
                 delete convertedSource.infoTemplate;
               }
-              def.resolve(convertedSource);
+              */
+              if (convertedSource._featureLayerId) {
+                var layerInfo = this.layerInfosObj
+                  .getLayerInfoById(convertedSource._featureLayerId);
+                if(layerInfo) {
+                  flayer.setDefinitionExpression(layerInfo.getFilter());
+                }
+              }
+
+              //var template = this._getInfoTemplate(flayer, source, source.displayField);
+              this._getInfoTemplate(flayer, source).then(lang.hitch(this, function(infoTemplate){
+                convertedSource.infoTemplate = lang.clone(infoTemplate);
+                def.resolve(convertedSource);
+              }), lang.hitch(this, function() {
+                def.resolve(convertedSource);
+              }));
             })));
 
             this.own(on(searchLayer, 'error', function() {
@@ -307,6 +370,27 @@ define([
         return sourceDefs;
       },
 
+      _getInfoTemplate: function(fLayer, source) {
+        var def = new Deferred();
+        var layerInfo = this.layerInfosObj.getLayerInfoById(source.layerId);
+        var template;
+        //var template = layerInfo && layerInfo.getInfoTemplate();
+        //var validTemplate = layerInfo && template;
+
+        if (layerInfo) {
+          def = layerInfo.loadInfoTemplate();
+        } else { // (added by user in setting) or (only configured fieldInfo)
+          template = new InfoTemplate();
+          template.setTitle('&nbsp;');
+          template.setContent(
+            lang.hitch(this, '_formatContent', source.name, fLayer, source.displayField)
+          );
+          def.resolve(template);
+        }
+        return def;
+      },
+
+      /*
       _getInfoTemplate: function(fLayer, source, displayField) {
         var layerInfo = this.layerInfosObj.getLayerInfoById(source.layerId);
         var template = layerInfo && layerInfo.getInfoTemplate();
@@ -327,6 +411,7 @@ define([
           return template;
         }
       },
+      */
 
       _getSourcePopupInfo: function(source) {
         if (source._featureLayerId) {
@@ -347,14 +432,27 @@ define([
           var source = this.searchDijit.sources[sourceIndex];
           if (source && 'featureLayer' in source) {
             var popupInfo = this._getSourcePopupInfo(source);
-            var formatedAttrs = this._getFormatedAttrs(
-              lang.clone(e.feature.attributes),
-              source.featureLayer.fields,
-              source.featureLayer.typeIdField,
-              source.featureLayer.types,
-              popupInfo
-            );
-            e.feature.attributes = formatedAttrs;
+            var notFormatted = (popupInfo && popupInfo.showAttachments) ||
+              (popupInfo && popupInfo.description &&
+              popupInfo.description.match(/http(s)?:\/\//)) ||
+              (popupInfo && popupInfo.mediaInfos && popupInfo.mediaInfos.length > 0);
+
+            // set a private property for select-result to get original feature from layer.
+            if (!e.feature.__attributes) {
+              e.feature.__attributes = e.feature.attributes;
+            }
+
+            if (!notFormatted) {
+              var formatedAttrs = this._getFormatedAttrs(
+                lang.clone(e.feature.attributes),
+                source.featureLayer.fields,
+                source.featureLayer.typeIdField,
+                source.featureLayer.types,
+                popupInfo
+              );
+
+              e.feature.attributes = formatedAttrs;
+            }
           }
         }
 
@@ -581,12 +679,20 @@ define([
         } else {
           this._onClearSearch();
         }
+        // publish search results to other widgets
+        this.publishData({
+          'searchResults': evt
+        });
       },
 
-      _onSuggestResults: function() {
+      _onSuggestResults: function(evt) {
         this._resetSelectorPosition('.searchMenu');
 
         this._hideResultMenu();
+        // publish suggest results to other widgets
+        this.publishData({
+          'suggestResults': evt
+        });
       },
 
       _onSelectSearchResult: function(evt) {
@@ -609,14 +715,58 @@ define([
         }
       },
 
+      _showPopupByFeatures: function(features, selectEvent) {
+        var location = null;
+        //this.map.infoWindow.clearFeatures();
+        //this.map.infoWindow.hide();
+        this.map.infoWindow.setFeatures(features);
+        if (features[0].geometry.type === "point") {
+          location = features[0].geometry;
+        } else {
+          location = features[0].geometry.getExtent().getCenter();
+        }
+        this.map.infoWindow.show(location, {
+          closetFirst: true
+        });
+        this.map.setExtent(selectEvent.result.extent);
+      },
+
+      _loadInfoTemplateAndShowPopup: function(layerInfo, selectedFeature, selectEvent) {
+        if(layerInfo) {
+          var layerObjectInMap = this.map.getLayer(layerInfo.id);
+          if(layerInfo.isPopupEnabled() && layerObjectInMap) {
+            this._showPopupByFeatures([selectedFeature], selectEvent);
+          } else {
+            layerInfo.loadInfoTemplate().then(lang.hitch(this, function(infoTemplate) {
+              //temporary set infoTemplate to selectedFeature.
+              selectedFeature.setInfoTemplate(lang.clone(infoTemplate));
+              this._showPopupByFeatures([selectedFeature], selectEvent);
+              // clear infoTemplate for selectedFeature;
+              var handle = aspect.before(this.map, 'onClick', lang.hitch(this, function() {
+                selectedFeature.setInfoTemplate(null);
+                handle.remove();
+              }));
+            }));
+          }
+        }
+      },
+
       _onSelectResult: function(e) {
         var result = e.result;
-        if (!(result && result.name)) {
-          return;
-        }
         var dataSourceIndex = e.sourceIndex;
         var sourceResults = this.searchResults[dataSourceIndex];
         var dataIndex = 0;
+        var resultFeature = e.result.feature;
+        var sourceLayerId = e.source._featureLayerId;
+
+        var getGraphics = function(layer, fid) {
+          var graphics = layer.graphics;
+          var gs = array.filter(graphics, function(g) {
+            return g.attributes[layer.objectIdField] === fid;
+          });
+          return gs;
+        };
+
         for (var i = 0, len = sourceResults.length; i < len; i++) {
           if (jimuUtils.isEqual(sourceResults[i], result)) {
             dataIndex = i;
@@ -630,12 +780,70 @@ define([
             var dIdx = html.getAttr(li, 'data-index');
             var dsIndex = html.getAttr(li, 'data-source-index');
 
-            if (title === result.name &&
+            if (result &&
+              result.name &&
+              title === result.name.toString() &&
               dIdx === dataIndex.toString() &&
               dsIndex === dataSourceIndex.toString()) {
               html.addClass(li, 'result-item-selected');
             }
           }));
+
+        //var layer = this.map.getLayer(sourceLayerId);
+        var layerInfo = this.layerInfosObj.getLayerInfoById(sourceLayerId);
+
+        if (layerInfo  && this.config.showInfoWindowOnSelect) {
+          layerInfo.getLayerObject().then(lang.hitch(this, function(layer) {
+            var gs = getGraphics(layer, resultFeature.__attributes[layer.objectIdField]);
+            if (gs && gs.length > 0) {
+              //this._showPopupByFeatures(gs);
+              this._loadInfoTemplateAndShowPopup(layerInfo, gs[0], e);
+            } else {
+              /*
+              var handle = on(layer, 'update-end', lang.hitch(this, function() {
+                if (this.domNode) {
+                  var gs = getGraphics(layer, resultFeature.__attributes[layer.objectIdField]);
+                  if (gs.length > 0) {
+                    this._showPopupByFeatures(gs);
+                  }
+                }
+
+                if (handle && handle.remove) {
+                  handle.remove();
+                }
+              }));
+              this.own(handle);
+              */
+
+              var featureQuery = new FeatureQuery();
+              featureQuery.where = layer.objectIdField + " = " +
+                                 resultFeature.__attributes[layer.objectIdField];
+              featureQuery.outSpatialReference = this.map.spatialReference;
+
+              layer.selectFeatures(featureQuery,
+                                   FeatureLayer.SELECTION_NEW,
+                                   lang.hitch(this, function(selectedFeatures) {
+                var selectedFeature = null;
+                if(selectedFeatures && selectedFeatures.length > 0) {
+                  selectedFeature = selectedFeatures[0];
+                  layer.add(selectedFeature);
+
+                  this._loadInfoTemplateAndShowPopup(layerInfo, selectedFeature, e);
+                }
+              }), lang.hitch(this, function() {
+                // show popupInfo of searchResult.
+                var selectedFeature = resultFeature;
+                this._loadInfoTemplateAndShowPopup(layerInfo, selectedFeature, e);
+              }));
+            }
+          }));
+
+        }
+
+        // publish select result to other widgets
+        this.publishData({
+          'selectResult': e
+        });
       },
 
       _onClearSearch: function() {
@@ -680,6 +888,26 @@ define([
         }
 
         this.inherited(arguments);
+      },
+
+      _hidePopup: function() {
+        if (this.map.infoWindow.isShowing) {
+          this.map.infoWindow.hide();
+        }
+      },
+
+      onActive: function() {
+        this._mapClickHandle = aspect.before(this.map, 'onClick', lang.hitch(this, function() {
+          this._hidePopup();
+          return arguments;
+        }));
+      },
+
+      onDeActive: function() {
+        if (this._mapClickHandle && this._mapClickHandle.remove) {
+          this._mapClickHandle.remove();
+        }
+        this._hidePopup();
       }
     });
   });

@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////
-// Copyright © 2014 Esri. All Rights Reserved.
+// Copyright © 2014 - 2017 Esri. All Rights Reserved.
 //
 // Licensed under the Apache License Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,41 +21,43 @@ define([
   'dojo/Deferred',
   'dojo/on',
   'dojo/topic',
-  'dojo/_base/unload',
   'dojo/Evented',
   'dojo/promise/all',
   './LayerInfoFactory'
 ], function(declare, array, lang, Deferred, on, topic,
-  baseUnload, Evented, all, LayerInfoFactory) {
+  Evented, all, LayerInfoFactory) {
   var clazz = declare([Evented], {
+    declaredClass: "jimu.LayerInfos",
     map: null,
     _operLayers: null,
     _layerInfos: null,
     _finalLayerInfos: null,
     _tableInfos: null,
-    _finalTableInfos: null,
+    //_finalTableInfos: null,
     _basemapLayers: null,
+    _unreachableLayersTitleOfWebmap: null,
+    _objectId: null,
+    _layerInfoFactory: null,
 
-    constructor: function(map, webmapItemData, options) {
+    constructor: function(map, webmapItemData) {
+      this._objectId = Math.random();
+      this._unreachableLayersTitleOfWebmap = [];
       this._basemapLayers = webmapItemData.baseMap.baseMapLayers;
       this._operLayers = webmapItemData.operationalLayers;
-      this.tables = webmapItemData.tables;
+      this._tables = webmapItemData.tables;
+      this._layerInfoFactory = new LayerInfoFactory(map, this);
       this.map = map;
-      this.options = options;
       this._initLayerInfos();
       this._initTablesInfos();
       this.update();
-      //aspect.after(this.map, "onBaseChange", lang.hitch(this, this._onBasemapChange));
-      //on(this.map, "basemap-change", lang.hitch(this, this._onBasemapChange));
-      //topic.subscribe('publishData', lang.hitch(this, this._onReceiveBasemapGalleryeData));
       this._bindEvents();
     },
 
     update: function() {
       this._extraSetLayerInfos();
-      this._clearAddedFlag(this._layerInfos);
-      this._initFinalTableInfos();
-      this._initFinalLayerInfos(this._layerInfos);
+      this._clearAddedFlag(this._finalLayerInfos);
+      //this._initFinalTableInfos();
+      this._initFinalLayerInfos();
       this._markFirstOrLastNode();
     },
 
@@ -86,12 +88,31 @@ define([
       return layerInfoArrayOfWebmap;
     },
 
+    getTableInfoArrayOfWebmap: function(){
+      var tableInfoArrayOfWebmap = [];
+      array.forEach(this.getTableInfoArray(), function(tableInfo) {
+        for(var i = 0; i < this._tables.length; i++) {
+          if(tableInfo.id === this._tables[i].id) {
+            tableInfoArrayOfWebmap.push(tableInfo);
+            break;
+          }
+        }
+      }, this);
+      return tableInfoArrayOfWebmap;
+    },
+
     getLayerInfoArray: function() {
-      return this._finalLayerInfos;
+      return array.filter(this._finalLayerInfos, function(layerInfo) {
+        // supports to set isTemporaryLayer when layerObject already added to map.
+        if(lang.getObject("_wabProperties.isTemporaryLayer", false, layerInfo.layerObject)) {
+          layerInfo._flag._isTemporaryLayerInfo = true;
+        }
+        return !layerInfo._flag._isTemporaryLayerInfo;
+      });
     },
 
     getTableInfoArray: function() {
-      return this._finalTableInfos;
+      return this._tableInfos;
     },
 
     addFeatureCollection: function(featureLayers, title) {
@@ -113,7 +134,7 @@ define([
 
       var newLayerInfo;
       try {
-        newLayerInfo = LayerInfoFactory.getInstance().create({
+        newLayerInfo = this._layerInfoFactory.create({
           featureCollection: featureCollection,
           title: title || id,
           id: id
@@ -128,7 +149,7 @@ define([
         newLayerInfo._extraOfWebmapLayerInfo = true;
         this._layerInfos.push(newLayerInfo);
         this.update();
-        this._onUpdated();
+        this._onLayersUpdated(newLayerInfo, newLayerInfo.getRootLayerInfo());
       }
 
     },
@@ -145,39 +166,72 @@ define([
       //      options: Optional parameters; See options list of FeatureLayer's Constructor from
       //               ArcGIS JavaScript API reference.
       //    }
-      var tableInfos = [];
-      var tableInfo = this._addTable(table, this._finalTableInfos);
-      this._tableInfos.push(tableInfo);
-      tableInfos.push(tableInfo);
-      this._onTableChange(tableInfos, 'added');
+      var tableInfos = this._addTables([table], this._tableInfos);
+      return tableInfos[0] ? tableInfos[0] : null;
     },
 
-    _addTable: function(table, targetTableInfos) {
-      var tableInfo;
-      try {
-        table.layerObject = {
-          url: table.url,
-          featureCollectionData: table.featureCollectionData,
-          empty: true
-        };
-        table.id = this._getUniqueTableId(table.id);
-        table.selfType = 'table';
+    removeTable: function(tableInfo) {
+      var tableInfoIndex = -1;
+      array.forEach(this._tableInfos, function(_tableInfo, index) {
+        if(tableInfo.id === _tableInfo.id) {
+          tableInfoIndex = index;
+        }
+      });
 
-        tableInfo = LayerInfoFactory.getInstance().create(table);
-        tableInfo.init();
-      } catch (err) {
-        console.warn(err.message);
-        tableInfo = null;
+      if(tableInfoIndex >= 0) {
+        var removedTableInfo = this._tableInfos[tableInfoIndex];
+        this._tableInfos.splice(tableInfoIndex, 1);
+        removedTableInfo.destroy();
+        this._onTableChange([tableInfo], clazz.REMOVED);
       }
-      if (tableInfo && targetTableInfos) {
-        targetTableInfos.push(tableInfo);
-      }
-      return tableInfo;
+    },
+
+    _addTables: function(tables, targetTableInfos) {
+      var tableInfos = [];
+      var tableObjectDefs = [];
+      array.forEach(tables, function(table) {
+        var tableInfo;
+        try {
+          table.layerObject = {
+            url: table.url,
+            featureCollectionData: table.featureCollectionData,
+            empty: true
+          };
+          table.id = this._getUniqueTableId(table.id);
+          table.selfType = 'table';
+
+          tableInfo = this._layerInfoFactory.create(table);
+          tableInfo.init();
+        } catch (err) {
+          console.warn(err.message);
+          tableInfo = null;
+        }
+        if(tableInfo) {
+          tableInfos.push(tableInfo);
+          targetTableInfos.push(tableInfo);
+          tableObjectDefs.push(tableInfo.getLayerObject());
+        }
+      }, this);
+      all(tableObjectDefs).then(lang.hitch(this, function(tableObjects) {
+        var addedTableInfos = [];
+        array.forEach(tableObjects, function(tableObject, index) {
+          var currentTableInfo = tableInfos[index];
+          if(tableObject) {
+            addedTableInfos.push(currentTableInfo);
+          } else {
+            this.removeTable(currentTableInfo);
+            currentTableInfo.destroy();
+          }
+        }, this);
+        this._onTableChange(addedTableInfos, clazz.ADDED);
+      }));
+
+      return tableInfos;
     },
 
 
     _getUniqueTableId: function(id) {
-      var tableInfos = this._tableInfos.concat(this._finalTableInfos || []);
+      var tableInfos = this._tableInfos.concat(this._tableInfos || []);
       return this._getUniqueLayerOrTableId(id, tableInfos);
     },
 
@@ -206,10 +260,6 @@ define([
           number++;
         }
       }
-    },
-
-    removeTable: function() {
-
     },
 
     //callback(layerInfo){
@@ -243,53 +293,136 @@ define([
       return this._traversal(callback, layerInfoArray);
     },
 
+    //callback(layerInfo){
+    // return true;   will interrupte traversal
+    // return false;  contiue traversal
+    //}
+    traversalAll: function(callback) {
+      // summary:
+      //  traversal all layerInfoArray and table tableInfoArray
+      var layerInfoArray = this.getLayerInfoArray();
+      var tableInfoArray = this.getTableInfoArray();
+      return this._traversal(callback, layerInfoArray.concat(tableInfoArray));
+    },
+
+    //callback(layerInfo){
+    // return true;   will interrupte traversal
+    // return false;  contiue traversal
+    //}
+    _traversalAllWithSpecialLayerInfo: function(callback) {
+      // summary:
+      //  traversal all layerInfoArray and table tableInfoArray
+      var layerInfoArray = this._finalLayerInfos;
+      var tableInfoArray = this._tableInfos;
+      return this._traversal(callback, layerInfoArray.concat(tableInfoArray));
+    },
+
     getLayerInfoById: function(layerId) {
       return this._findLayerInfoById(layerId);
     },
 
+    getTableInfoById: function(tableId) {
+      var tableInfoResult = null;
+      array.some(this.getTableInfoArray(), function(tableInfo) {
+        if(tableInfo.id === tableId) {
+          tableInfoResult = tableInfo;
+          return true;
+        }
+      });
+      return tableInfoResult;
+    },
+
+    getLayerOrTableInfoById: function(layerOrTableId) {
+      var layerOrTableInfoResult = null;
+      this.traversalAll(function(layerOrTableInfo) {
+        if(layerOrTableInfo.id === layerOrTableId) {
+          layerOrTableInfoResult = layerOrTableInfo;
+          return true;
+        }
+      });
+      return layerOrTableInfoResult;
+    },
+
+    // interface concern layerInfo or tableInfo has to redefine.
     getLayerInfoByTopLayerId: function(layerId) {
       return this._findTopLayerInfoById(layerId);
     },
 
-    moveUpLayer: function(id) {
-      var beChangedId = null,
-        tempLayerInfo;
-      var index = this._getTopLayerInfoIndexById(id),
-        l;
-      if (index > 0) {
-        l = this._finalLayerInfos[index - 1].obtainLayerIndexesInMap().length;
-        this._finalLayerInfos[index].moveRightOfIndex(this._finalLayerInfos[index - 1]
+    moveUpLayer: function(layerInfo, steps) {
+      // summary:
+      //    move up layerInfo
+      // description:
+      //    parameters:
+      //      layerInfo: layerInfo to be moved
+      //      steps: steps of move down
+      var beChangedLayerInfo = null/*, tempLayerInfo*/;
+      steps = steps ? steps : 1;
+      var index = this._getTopLayerInfoIndexById(layerInfo.id), l;
+      if (index - steps >= 0) {
+        l = this._finalLayerInfos[index - steps].obtainLayerIndexesInMap().length;
+        this._finalLayerInfos[index].moveLayerByIndex(this._finalLayerInfos[index - steps]
           .obtainLayerIndexesInMap()[l - 1].index);
-        beChangedId = this._finalLayerInfos[index - 1].id;
+        beChangedLayerInfo = this._finalLayerInfos[index - steps];
         //this.update();
+        /*
         tempLayerInfo = this._finalLayerInfos[index];
         this._finalLayerInfos.splice(index, 1);
-        this._finalLayerInfos.splice(index - 1, 0, tempLayerInfo);
+        this._finalLayerInfos.splice(index - steps, 0, tempLayerInfo);
         this._markFirstOrLastNode();
+        topic.publish('layerInfos/layerReorder');
+        */
+        topic.publish('layerInfos/layerReorder', index, steps, 'moveup');
       }
-      return beChangedId;
+      return beChangedLayerInfo;
     },
 
-    moveDownLayer: function(id) {
-      var beChangedId = null,
-        tempLayerInfo;
-      var index = this._getTopLayerInfoIndexById(id);
-      if (index < (this._finalLayerInfos.length - 1)) {
-        this._finalLayerInfos[index].moveLeftOfIndex(this._finalLayerInfos[index + 1]
-          .obtainLayerIndexesInMap()[0].index);
-        beChangedId = this._finalLayerInfos[index + 1].id;
-        //this.update();
-        tempLayerInfo = this._finalLayerInfos[index + 1];
-        this._finalLayerInfos.splice(index + 1, 1);
-        this._finalLayerInfos.splice(index, 0, tempLayerInfo);
+    _reorderLayerInfosArray: function(beMovedLayerInfoIndex, steps, moveUpOrDown) {
+      var tempLayerInfo;
+      if(moveUpOrDown === "moveup") {
+        tempLayerInfo = this._finalLayerInfos[beMovedLayerInfoIndex];
+        this._finalLayerInfos.splice(beMovedLayerInfoIndex, 1);
+        this._finalLayerInfos.splice(beMovedLayerInfoIndex - steps, 0, tempLayerInfo);
+        this._markFirstOrLastNode();
+      } else {
+        tempLayerInfo = this._finalLayerInfos[beMovedLayerInfoIndex];
+        this._finalLayerInfos.splice(beMovedLayerInfoIndex + steps + 1, 0, tempLayerInfo);
+        this._finalLayerInfos.splice(beMovedLayerInfoIndex, 1);
         this._markFirstOrLastNode();
       }
-      return beChangedId;
+
+      return tempLayerInfo;
+    },
+
+    moveDownLayer: function(layerInfo, steps) {
+      // summary:
+      //    move down layerInfo
+      // description:
+      //    parameters:
+      //      layerInfo: layerInfo to be moved
+      //      steps: steps of move down
+      var beChangedLayerInfo = null/*, tempLayerInfo*/;
+      steps = steps ? steps : 1;
+      var index = this._getTopLayerInfoIndexById(layerInfo.id);
+      if (index + steps <= (this._finalLayerInfos.length - 1)) {
+        this._finalLayerInfos[index].moveLayerByIndex(this._finalLayerInfos[index + steps]
+          .obtainLayerIndexesInMap()[0].index);
+        beChangedLayerInfo = this._finalLayerInfos[index + steps];
+        //this.update();
+        /*
+        tempLayerInfo = this._finalLayerInfos[index];
+        this._finalLayerInfos.splice(index + steps + 1, 0, tempLayerInfo);
+        this._finalLayerInfos.splice(index, 1);
+        this._markFirstOrLastNode();
+        topic.publish('layerInfos/layerReorder');
+        */
+        topic.publish('layerInfos/layerReorder', index, steps, 'movedown');
+      }
+      return beChangedLayerInfo;
     },
 
     getBasemapLayers: function() {
       var basemapLayers = [];
-      array.forEach(this.map.layerIds, function(layerId) {
+      array.forEach(this.map.layerIds.concat(this.map.graphicsLayerIds || []), function(layerId) {
         var layer = this.map.getLayer(layerId);
         if (layer._basemapGalleryLayerType === "basemap" ||
           layer._basemapGalleryLayerType === "reference") {
@@ -318,7 +451,6 @@ define([
         // return mapNotesCondition;
         return layerInfo.isMapNotesLayerInfo();
       }, this);
-
     },
 
     // options = {
@@ -330,9 +462,18 @@ define([
     // }
     restoreState: function(options) {
       // restore layers visibility
-      array.forEach(this.getLayerInfoArray(), function(rootLayerInfo) {
-        rootLayerInfo.resetLayerObjectVisibility(options);
+      var layerOptions = options && options.layerOptions ? options.layerOptions: null;
+      array.forEach(this._finalLayerInfos, function(rootLayerInfo) {
+        rootLayerInfo.resetLayerObjectVisibility(layerOptions);
       }, this);
+    },
+
+    getUnreachableLayersTitle: function() {
+      return this._unreachableLayersTitleOfWebmap;
+    },
+
+    getObjectId: function() {
+      return this._objectId;
     },
 
     _initLayerInfos: function() {
@@ -340,11 +481,12 @@ define([
       this._layerInfos = [];
       array.forEach(this._operLayers, function(operLayer) {
         try {
-          layerInfo = LayerInfoFactory.getInstance().create(operLayer);
+          layerInfo = this._layerInfoFactory.create(operLayer);
           layerInfo.init();
         } catch (err) {
           console.warn(err.message);
           layerInfo = null;
+          this._unreachableLayersTitleOfWebmap.push(operLayer.title);
         }
         if (layerInfo) {
           this._layerInfos.push(layerInfo);
@@ -355,12 +497,11 @@ define([
     _extraSetLayerInfos: function() {
       //temporary code for getLayerInfoArrayOfWebmap
       this._removedLayerInfoIdsFromFeatureCollection = [];
-      array.forEach(this._layerInfos, function(layerInfo, index) {
+      array.forEach(this._finalLayerInfos || this._layerInfos, function(layerInfo, index) {
         var newLayerInfo;
-        if (layerInfo.layerObject.declaredClass === 'esri.layers.GeoRSSLayer' ||
-          layerInfo.layerObject.declaredClass === 'esri.layers.KMLLayer') {
+        if (layerInfo._needToRenew()) {
           try {
-            newLayerInfo = LayerInfoFactory.getInstance().create(layerInfo.originOperLayer);
+            newLayerInfo = this._layerInfoFactory.create(layerInfo.originOperLayer);
             newLayerInfo.init();
           } catch (err) {
             console.warn(err.message);
@@ -368,8 +509,8 @@ define([
           }
           if (newLayerInfo) {
             //show new
-            layerInfo.destroyLayerInfo();
-            this._layerInfos[index] = newLayerInfo;
+            layerInfo.destroy();
+            this._finalLayerInfos[index] = newLayerInfo;
           }
         } else if (layerInfo.originOperLayer.featureCollection) {
           var subLayerIds = [];
@@ -388,20 +529,32 @@ define([
             subLayerObject.title = layerInfo.title;
             layerInfo.removeSubLayerById(subLayerInfo.id);
             this._removedLayerInfoIdsFromFeatureCollection.push(subLayerInfo.id);
+            layerInfo.id = layerInfo.id + "_logically_removed";
           }
         }
       }, this);
     },
 
-    _initFinalLayerInfos: function(layerInfos) {
-      //handle order to dicide finalLayerInfos order
+    _refineFinalLayerInfos: function() {
+      // keep _finalLayerInfos is null if it's null.
+      if(this._finalLayerInfos) {
+        this._finalLayerInfos = array.filter(this._finalLayerInfos, function(layerInfo) {
+          return !layerInfo._flag._invalid;
+        });
+      }
+    },
+
+    _initFinalLayerInfos: function() {
+      //handle order to dicide _finalLayerInfos order
       var i, id;
+      var baseLayerInfos = this._finalLayerInfos || this._layerInfos;
       this._finalLayerInfos = [];
+
       //for (i = 0; i < this.map.graphicsLayerIds.length; i++) {
       for (i = this.map.graphicsLayerIds.length - 1; i >= 0; i--) {
         id = this.map.graphicsLayerIds[i];
         if (!this._isBasemap(id)) {
-          this._addToFinalLayerInfos(this._findLayerInfoByIdAndReturnTopLayer(id, layerInfos),
+          this._addToFinalLayerInfos(this._findLayerInfoByIdAndReturnTopLayer(id, baseLayerInfos),
             id,
             true);
         }
@@ -411,12 +564,33 @@ define([
       for (i = this.map.layerIds.length - 1; i >= 0; i--) {
         id = this.map.layerIds[i];
         if (!this._isBasemap(id)) {
-          this._addToFinalLayerInfos(this._findLayerInfoByIdAndReturnTopLayer(id, layerInfos),
+          this._addToFinalLayerInfos(this._findLayerInfoByIdAndReturnTopLayer(id, baseLayerInfos),
             id,
             false);
         }
       }
+      this._refineFinalLayerInfos();
     },
+
+    _initTablesInfos: function() {
+      this._tableInfos = [];
+      var reverseTables = this._tables && this._tables.reverse();
+      if(reverseTables) {
+        this._addTables(reverseTables, this._tableInfos);
+      }
+    },
+
+    // _initFinalTableInfos: function() {
+    //   // this._finalTableInfos = [];
+    //   // array.forEach(this._tableInfos, function(tableInfo) {
+    //   //   this._finalTableInfos.push(tableInfo);
+    //   // }, this);
+    //   var baseTableInfosInfos = this._finalTableInfos || this._tableInfos;
+    //   this._finalTableInfos = [];
+    //   array.forEach(baseTableInfosInfos, function(tableInfo) {
+    //     this._finalTableInfos.push(tableInfo);
+    //   }, this);
+    // },
 
     _isBasemap: function(id) {
       var isBasemap = false;
@@ -463,19 +637,25 @@ define([
         //(newLayer.type === "Table"))) {
         //if (newLayer.declaredClass === 'esri.layers.FeatureLayer') {
         if (newLayer.declaredClass !== "esri.layers.GraphicsLayer" &&
-            newLayer.id !== "labels") {
+            newLayer.declaredClass !== "esri.layers.LabelLayer") {
           try {
-            newLayerInfo = LayerInfoFactory.getInstance().create({
+            var originOperLayer = {
               layerObject: newLayer,
               title: this._getLayerTitle(newLayer),
               id: newLayer.id || " "
-            }, this.map);
+            };
+            // mixin originOperLayer from layerObject if it has.
+            lang.mixin(originOperLayer, lang.getObject("_wabProperties.originOperLayer", false, newLayer));
+            newLayerInfo = this._layerInfoFactory.create(originOperLayer, this.map);
             newLayerInfo.init();
           } catch (err) {
             console.warn(err.message);
             newLayerInfo = null;
           }
           if (newLayerInfo) {
+            if(lang.getObject('_wabProperties.isTemporaryLayer', false, newLayer)) {
+              newLayerInfo._flag._isTemporaryLayerInfo = true;
+            }
             this._finalLayerInfos.push(newLayerInfo);
           }
         }
@@ -484,18 +664,20 @@ define([
         if (newLayer.declaredClass === "esri.layers.ArcGISDynamicMapServiceLayer" ||
           newLayer.declaredClass === "esri.layers.ArcGISTiledMapServiceLayer") {
           if (newLayerInfo) {
-            newLayerInfo._getLayerDefinition().then(lang.hitch(this, function(layerDifinition) {
-              var newTableInfos = [];
-              array.forEach(layerDifinition.tables, function(tableDifination) {
+            newLayerInfo._getServiceDefinition().then(lang.hitch(this, function(serviceDefinition) {
+              //var newTableInfos = [];
+              var tableDifinations = [];
+              array.forEach(serviceDefinition.tables, function(tableDifination) {
                 tableDifination.url = newLayerInfo.getUrl() + '/' + tableDifination.id;
                 tableDifination.id = newLayerInfo.id + '_' + tableDifination.id;
                 tableDifination.title = this._getLayerTitle(tableDifination);
-                var newTalbeInfo = this._addTable(tableDifination, this._finalTableInfos);
-                if (newTalbeInfo) {
-                  newTableInfos.push(newTalbeInfo);
-                }
+                // var newTalbeInfo = this._addTable([tableDifination], this._tableInfos);
+                // if (newTalbeInfo) {
+                //   newTableInfos.push(newTalbeInfo);
+                // }
+                tableDifinations.push(tableDifination);
               }, this);
-              this._onTableChange(newTableInfos, 'added');
+              this._addTables(tableDifinations, this._tableInfos);
             }));
           }
         }
@@ -508,20 +690,30 @@ define([
         return layer.title;
       }
 
+      if(lang.getObject("_wabProperties.originalLayerName", false, layer)) {
+        return layer.name || layer.id;
+      }
+
       var title = layer.label || layer.name || "";
       if (layer.url) {
         var serviceName;
-        var serviceKeyWord = "rest/services/";
-        var index1 = layer.url.indexOf(serviceKeyWord);
-        if (index1 > -1) {
-          var index2 = index1 + serviceKeyWord.length;
-          serviceName = layer.url.substring(index2).split('/')[0];
+        var index = layer.url.indexOf("/FeatureServer");
+        if (index === -1) {
+          index = layer.url.indexOf("/MapServer");
+        }
+        if (index === -1) {
+          index = layer.url.indexOf("/service");
+        }
+        if(index > -1) {
+          serviceName = layer.url.substring(0, index);
+          serviceName = serviceName.substring(serviceName.lastIndexOf("/") + 1, serviceName.length);
           if (title) {
             title = serviceName + " - " + title;
           } else {
             title = serviceName;
           }
         }
+
       }
       return title || layer.id;
     },
@@ -569,7 +761,7 @@ define([
 
     _findTopLayerInfoById: function(id) {
       var i, layerInfo = null;
-      var layerInfos = this._finalLayerInfos;
+      var layerInfos = this._finalLayerInfos.concat(this._tableInfos); //******
       for (i = 0; i < layerInfos.length; i++) {
         if (layerInfos[i].id === id) {
           layerInfo = layerInfos[i];
@@ -649,32 +841,25 @@ define([
     },
 
     _destroyLayerInfos: function() {
-      array.forEach(this.getLayerInfoArray(), lang.hitch(this, function(layerInfo) {
-        layerInfo.destroyLayerInfo();
+      array.forEach(this._finalLayerInfos, lang.hitch(this, function(layerInfo) {
+        layerInfo.destroy();
       }));
     },
 
     _bindEvents: function() {
       // summary:
-      //    bind events are listened by this module
-      var handleAdd, handleRemove, handleBeforeUnload,
-      handleIsShowInMapChanged, handleVisibleChanged;
-      //this.own(aspect.after(this.map, "onLayerAddResult",
-      //  lang.hitch(this, this._onLayersChange)));
-      handleAdd = on(this.map, "layer-add-result", lang.hitch(this, this._onLayersChange, "added"));
-      //handleRemove = aspect.after(this.map, "onLayerRemove",
-      //  lang.hitch(this, this._onLayersChange));
-      handleRemove = on(this.map, "layer-remove",
-        lang.hitch(this, this._onLayersChange, "removed"));
-      //this.own(handleRemove);
-      //aspect.after(this.map, "onLayerReorder", lang.hitch(this, this._onLayersChange));
-      //this.own(on(this.map, "LayersAddResult", lang.hitch(this, this._onLayersChangeAdds)));
+      //   will be listened events by this module
+      var handleAdd, handleRemove, handleBeforeMapUnload, handleIsShowInMapChanged,
+      handleVisibleChanged, handleFilterChanged, handleReorder, handleRendererChanged,
+      handleOpacityChanged;
+      handleAdd = on(this.map, "layer-add-result", lang.hitch(this, this._onLayersChange, clazz.ADDED));
+      handleRemove = on(this.map, "layer-remove", lang.hitch(this, this._onLayersChange, clazz.REMOVED));
+
       //this.own(on(this.map, "layers-add-result", lang.hitch(this, this._onLayersChange)));
-      //handleRemoves =  aspect.after(this.map, "onLayersRemoved",
-      //  lang.hitch(this, this._onLayersChange));
       //handleRemoves = on(this.map, "layers-removed", lang.hitch(this, this._onLayersChange));
-      //this.own(handleRemoves);
-      //aspect.after(this.map, "onLayersReorder", lang.hitch(this, this._onLayersChange));
+
+      handleReorder = topic.subscribe('layerInfos/layerReorder',
+        lang.hitch(this, this._onLayerReorder));
 
       handleIsShowInMapChanged = topic.subscribe('layerInfos/layerInfo/isShowInMapChanged',
         lang.hitch(this, this._onShowInMapChanged));
@@ -682,105 +867,140 @@ define([
       handleVisibleChanged = topic.subscribe('layerInfos/layerInfo/visibleChanged',
         lang.hitch(this, this._onVisibleChanged));
 
-      handleBeforeUnload = on(this.map, "before-unload", lang.hitch(this, function() {
+      handleFilterChanged = topic.subscribe('layerInfos/layerInfo/filterChanged',
+        lang.hitch(this, this._onFilterChanged));
+
+      handleRendererChanged = topic.subscribe('layerInfos/layerInfo/rendererChanged',
+        lang.hitch(this, this._onRendererChanged));
+
+      handleOpacityChanged = topic.subscribe('layerInfos/layerInfo/opacityChanged',
+        lang.hitch(this, this._onOpacityChanged));
+
+      handleBeforeMapUnload = on(this.map, "before-unload", lang.hitch(this, function() {
         handleAdd.remove();
         handleRemove.remove();
+        handleReorder.remove();
         handleIsShowInMapChanged.remove();
         handleVisibleChanged.remove();
+        handleFilterChanged.remove();
+        handleRendererChanged.remove();
+        handleBeforeMapUnload.remove();
+        handleOpacityChanged.remove();
         this._destroyLayerInfos();
       }));
-
-      baseUnload.addOnUnload(function() {
-        handleAdd.remove();
-        handleRemove.remove();
-        handleBeforeUnload.remove();
-        handleIsShowInMapChanged.remove();
-        handleVisibleChanged.remove();
-      });
     },
 
-    _onLayersChange: function(changedType, evt) {
+    _emitEvent: function() {
+      try {
+        this.emit.apply(this, arguments);
+      } catch (err) {
+        console.warn(err);
+      }
+    },
+
+    _emitEventForEveryLayerInfo: function(eventName, changedLayerInfos) {
+      try {
+        array.forEach(changedLayerInfos, function(changedLayerInfo) {
+          changedLayerInfo.emitEvent(eventName);
+        }, this);
+      } catch (err) {
+        console.warn(err);
+      }
+    },
+
+    _onLayersChange: function(changedTypePara, evt) {
       /*jshint unused: false*/
       // summary:
       //    response to any layer change.
       // description:
       //    update LayerInfos data and publish event
-      //    changedType: "added" or "removed"
-      var layerInfo = null,
-        layerInfoSelf;
+      //    changedTypePara: "added" or "removed"
+      var layerInfo = null, layerInfoSelf, changedType;
       if (!evt.error &&
-        evt.layer.declaredClass !==
-        "esri.layers.GraphicsLayer" &&
+        evt.layer.declaredClass !== "esri.layers.GraphicsLayer" &&
+        evt.layer.declaredClass !== "esri.layers.LabelLayer" &&
         !evt.layer._basemapGalleryLayerType) {
-        if (changedType === "added") {
+        if (changedTypePara === clazz.ADDED) {
           this.update();
-          layerInfo = this._findTopLayerInfoById(evt.layer.id);
+          //layerInfo = this._findTopLayerInfoById(evt.layer.id);
           layerInfoSelf = this._findLayerInfoById(evt.layer.id);
+          layerInfo = layerInfoSelf;
+          changedType = clazz.ADDED;
+          if(layerInfoSelf && !layerInfoSelf.isRootLayer()) {
+            layerInfo = layerInfoSelf.getRootLayerInfo();
+            changedType = clazz.SUBLAYER_ADDED;
+          }
         } else {
-          layerInfo = this._findTopLayerInfoById(evt.layer.id);
+          //layerInfo = this._findTopLayerInfoById(evt.layer.id);
           layerInfoSelf = this._findLayerInfoById(evt.layer.id);
+          layerInfo = layerInfoSelf;
+          changedType = clazz.REMOVED;
+          if(layerInfoSelf && !layerInfoSelf.isRootLayer()) {
+            layerInfo = layerInfoSelf.getRootLayerInfo();
+            changedType = clazz.SUBLAYER_REMOVED;
+          }
+          if(layerInfoSelf) {
+            layerInfoSelf.destroy();
+          }
           this.update();
         }
         // layerInfos top layer changed.
-        this.emit('layerInfosChanged', layerInfo, changedType, layerInfoSelf);
+        if(layerInfo) {
+          this._emitEvent('layerInfosChanged', layerInfo, changedType, layerInfoSelf);
+        }
         // layerInfos selfLayer changed.
         // layerInfosWholeChanged
       }
     },
 
+    _onTableChange: function(tableInfos, changedType) {
+      var tableInfosSelf = tableInfos;
+      this._emitEvent('tableInfosChanged', tableInfos, changedType, tableInfosSelf);
+    },
+
+    _onLayersUpdated: function(layerInfo, layerInfoSelf) {
+      if(layerInfo.isTable) {
+        this._emitEvent('tableInfosChanged', [layerInfo], clazz.UPDATED, [layerInfoSelf]);
+      } else {
+        this._emitEvent('layerInfosChanged', layerInfo, clazz.UPDATED, layerInfoSelf);
+      }
+    },
+
     _onShowInMapChanged: function(changedLayerInfos) {
-      this.emit('layerInfosIsShowInMapChanged', changedLayerInfos);
+      this._emitEvent('layerInfosIsShowInMapChanged', changedLayerInfos);
+      this._emitEventForEveryLayerInfo('isShowInMapChanged', changedLayerInfos);
     },
 
     _onVisibleChanged: function(changedLayerInfos) {
-      this.emit('layerInfosIsVisibleChanged', changedLayerInfos);
+      this._emitEvent('layerInfosIsVisibleChanged', changedLayerInfos);
+      this._emitEventForEveryLayerInfo('isVisibleChanged', changedLayerInfos);
     },
 
-    _initTablesInfos: function() {
-      // var tableInfo, tableInfos = [];
-      // array.forEach(this.tables, function(table) {
-      //   try {
-      //     table.empty = true;
-      //     tableInfo = LayerInfoFactory.getInstance().create({
-      //       layerObject: table,
-      //       title: table.title || table.id || " ",
-      //       id: table.id || " ",
-      //       selfType: 'table'
-      //     });
-      //     tableInfo.init();
-      //   } catch (err) {
-      //     console.warn(err.message);
-      //     tableInfo = null;
-      //   }
-      //   if (tableInfo) {
-      //     tableInfos.push(tableInfo);
-      //   }
-      // }, this);
-
-      // //layerInfos.reverse();
-      // this.tableInfos = tableInfos;
-
-      this._tableInfos = [];
-      array.forEach(this.tables, function(table) {
-        // add table from webmap and does not send 'tableChange' event.
-        this._addTable(table, this._tableInfos);
-      }, this);
+    _onFilterChanged: function(changedLayerInfos) {
+      this._emitEvent('layerInfosFilterChanged', changedLayerInfos);
+      this._emitEventForEveryLayerInfo('filterChanged', changedLayerInfos);
     },
 
-    _initFinalTableInfos: function() {
-      this._finalTableInfos = [];
-      array.forEach(this._tableInfos, function(tableInfo) {
-        this._finalTableInfos.push(tableInfo);
-      }, this);
+    _onLayerReorder: function(beMovedLayerInfoIndex, steps,  moveUpOrDown) {
+      // doesn't call update(), manual reorder layerInfosArrar.
+      var beMovedLayerInfo = this._reorderLayerInfosArray(beMovedLayerInfoIndex, steps, moveUpOrDown);
+      this._emitEvent('layerInfosReorder', beMovedLayerInfo, clazz.REORDERED, beMovedLayerInfo);
     },
 
-    _onTableChange: function(tableInfos, changedType) {
-      this.emit('tableInfosChanged', tableInfos, changedType);
+    _onRendererChanged: function(changedLayerInfos) {
+      this._emitEvent('layerInfosRendererChanged', changedLayerInfos);
+      this._emitEventForEveryLayerInfo('rendererChanged', changedLayerInfos);
     },
 
-    _onUpdated: function() {
-      this.emit('updated');
+    _onOpacityChanged: function(changedLayerInfos) {
+      this._emitEvent('layerInfosOpacityChanged', changedLayerInfos);
+      this._emitEventForEveryLayerInfo('opacityChanged', changedLayerInfos);
     }
+
+    // _onUpdated: function() {
+    //   this._emitEvent('updated');
+    // }
+
   });
 
   // static method to get LayerInfoArray by type, support types:
@@ -818,6 +1038,7 @@ define([
     return defRet;
   };
 
+  /*
   var instance = {
     empty: true,
     map: null,
@@ -825,20 +1046,12 @@ define([
     def: new Deferred()
   };
   // Return deferred because refere eatch other between LayerInfoFactory and LayerInfos.
-  clazz.getInstance = function(map, webmapItemInfo, options) {
+  clazz.getInstance = function(map, webmapItemInfo) {
     // summary:
     //   get layerInfs instance.
     // description:
     //    map: esri.map object.
     //    webmapItemInfo: itemInfo of webmap.
-    //    options = {
-    //    layerOptions: {
-    //      id: {
-    //            visible: true/false
-    //          }
-    //      }
-    //    }
-    //
     if (instance.map && instance.map !== map) {
       instance = {
         empty: true,
@@ -852,11 +1065,8 @@ define([
       instance.def.resolve(instance.layerInfos);
     } else if (instance.empty) {
       instance.empty = false;
-      if(!options) {
-        options = {};
-      }
-      LayerInfoFactory.getInstance(map, options).init().then(lang.hitch(this, function() {
-        var layerInfos = new clazz(map, webmapItemInfo.itemData, options);
+      LayerInfoFactory.getInstance(map).init().then(lang.hitch(this, function() {
+        var layerInfos = new clazz(map, webmapItemInfo.itemData);
         instance.map = map;
         instance.layerInfos = layerInfos;
         instance.def.resolve(layerInfos);
@@ -864,5 +1074,67 @@ define([
     } // else request is sending, return def.
     return instance.def;
   };
+  */
+
+  var instance = {
+    map: null,
+    layerInfos: null
+  };
+
+  // Return deferred for backward compatible.
+  clazz.getInstance = function(map, webmapItemInfo) {
+    var def = new Deferred();
+    def.resolve(clazz.getInstanceSyncForInit(map, webmapItemInfo));
+    return def;
+  };
+
+
+  clazz.getInstanceSyncForInit = function(map, webmapItemInfo) {
+    // summary:
+    //   get layerInfs instance.
+    // description:
+    //    map: esri.map object.
+    //    webmapItemInfo: itemInfo of webmap.
+    if (instance.map && instance.map !== map) {
+      instance = {
+        map: null,
+        layerInfos: null
+      };
+    }
+
+    if (!instance.layerInfos) {
+      instance.layerInfos = new clazz(map, webmapItemInfo.itemData);
+      instance.map = map;
+    }
+
+    return instance.layerInfos;
+  };
+
+  clazz.getInstanceSync = function() {
+    return instance.layerInfos;
+  };
+
+  clazz.setInstance = function(map, layerInfos) {
+    instance.map = map;
+    instance.layerInfos = layerInfos;
+  };
+
+  clazz.createInstance = function(map) {
+    var layerInfosWrap = {
+      map: map,
+      layerInfos: null
+    };
+    layerInfosWrap.layerInfos = new clazz(map, map.itemInfo.itemData);
+    return layerInfosWrap.layerInfos;
+  };
+
+  lang.mixin(clazz, {
+    ADDED: "added",
+    REMOVED: "removed",
+    SUBLAYER_ADDED: "subLayerAdded",
+    SUBLAYER_REMOVED: "subLayerRemoved",
+    UPDATED: "updated",
+    REORDERED: "reordered"
+  });
   return clazz;
 });

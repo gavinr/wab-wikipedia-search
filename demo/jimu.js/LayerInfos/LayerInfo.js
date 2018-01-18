@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////
-// Copyright © 2014 Esri. All Rights Reserved.
+// Copyright © 2014 - 2017 Esri. All Rights Reserved.
 //
 // Licensed under the Apache License Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,59 +23,102 @@ define([
   //'./NlsStrings',
   'dojo/dom-construct',
   'dojo/topic',
+  'dojo/aspect',
+  'dojo/Evented',
+  'jimu/portalUrlUtils',
+  'jimu/portalUtils',
+  'jimu/LayerNode',
+  './RequestBuffer',
+  'esri/request',
   'esri/config',
   'esri/tasks/ProjectParameters',
   'esri/SpatialReference',
   'esri/geometry/webMercatorUtils'
-], function(declare, array, lang, Deferred, all,
-/*NlsStrings,*/ domConstruct, topic, esriConfig, ProjectParameters,
+], function(declare, array, lang, Deferred, all, /*NlsStrings,*/ domConstruct, topic, aspect,
+Evented, portalUrlUtils, portalUtils, LayerNode, RequestBuffer, esriRequest, esriConfig, ProjectParameters,
 SpatialReference, webMercatorUtils) {
-  return declare(null, {
-    originOperLayer: null,
-    layerObject:     null,
-    map:             null,
-    title:           null,
-    id:              null,
-    newSubLayers:    null,
-    parentLayerInfo: null,
-    _oldIsShowInMap: null,
-    _eventHandles:   null,
+  var clazz = declare([Evented], {
+    declaredClass:            "jimu.LayerInfo",
+    originOperLayer:          null,
+    layerObject:              null,
+    map:                      null,
+    title:                    null,
+    id:                       null,
+    subId:                    null,
+    newSubLayers:             null,
+    parentLayerInfo:          null,
+    isTable:                  null,
+    isTiled:                  null,
+    _oldIsShowInMap:          null,
+    _oldFilter:               null,
+    _eventHandles:            null,
+    _subLayerInfoIndex:       null,
+    _serviceDefinitionBuffer: null,
+    _flag:                    null,
+    _objectId:                null,
+    _itemInfo:                null,
+    _adaptor:                 null,
 
-    constructor: function(operLayer, map, options) {
+    constructor: function(operLayer, map, layerInfoFactory, layerInfos) {
       this.originOperLayer = operLayer;
       this.layerObject = operLayer.layerObject;
       this.map = map;
       this.title = this.originOperLayer.title;
       this.id = this.originOperLayer.id;
-      this._layerOption = options.layerOptions ? options.layerOptions[this.id]: null;
+      this.subId = this.originOperLayer.subId !== undefined ? this.originOperLayer.subId : this.id;
       this.parentLayerInfo = operLayer.parentLayerInfo ? operLayer.parentLayerInfo : null;
-      this.nls = window.jimuNls.layerInfosMenu;
+      this.isTable = false;
+      this.isTiled = false;
       this._eventHandles = [];
+      this._layerInfoFactory = layerInfoFactory;
+      this._layerInfos = layerInfos;
+      this._flag = {};
+      this._objectId = Math.random();
+      this._adaptor = new LayerNode(this);
     },
 
     init: function() {
       // new section
-      // the order in init method can not changed.
+      // the order of methods below cannot be changed.
       this.newSubLayers = this.obtainNewSubLayers();
+      // init _subLayerInfoIndex
+      this._initSubLayerInfoIndex();
       //this._resetLayerObjectVisiblityBeforeInit();
-      this.initVisible();
+      this._initVisible();
       if (this.originOperLayer.popupInfo) {
         this.popupVisible = true;
       }
-      // init _oldIsShowInMap, must after initVisible()
+      // init _oldIsShowInMap, must after _initVisible()
       this._oldIsShowInMap = this.isShowInMap();
+      // init _oldFilter
+      this._initOldFilter();
+      // init _serviceDefinitionBuffer
+      this._initServiceDefinitionBuffer();
+
       this._bindEvent();
     },
 
-    // to decide layer display in whitch group, now only has two groups: graphic or nographic
+    _initOldFilter: function() {
+      // implemented by sub class.
+      this._oldFilter = null;
+    },
+
+    _initServiceDefinitionBuffer: function() {
+      this._serviceDefinitionBuffer = new RequestBuffer(lang.hitch(this, this._serviceDefinitionRequest));
+    },
+
+    // to decide layer display in whitch group, now only has two groups: graphic or nongraphic
     isGraphicLayer: function() {
       var layerIndexesInMap = this._obtainLayerIndexesInMap();
-      // to decide layer display in whitch group, now only has two groups: graphic or nographic
       return layerIndexesInMap.length ? layerIndexesInMap[0].isGraphicLayer : false;
     },
 
     obtainLayerIndexesInMap: function() {
       return this._obtainLayerIndexesInMap();
+    },
+
+    getObjectId: function() {
+      return this._objectId;
     },
 
     getExtent: function() {
@@ -106,13 +149,9 @@ SpatialReference, webMercatorUtils) {
     },
 
     // about change layer order.
-    moveLeftOfIndex: function(index) {
+    moveLayerByIndex: function(index) {
       this.map.reorderLayer(this.layerObject, index);
-    },
-
-    // *************** need to refactor.
-    moveRightOfIndex: function(index) {
-      this.map.reorderLayer(this.layerObject, index);
+      //topic.publish('layerInfos/layerReorder');
     },
 
     //callback(layerInfo){
@@ -133,7 +172,7 @@ SpatialReference, webMercatorUtils) {
 
     findLayerInfoById: function(id) {
       // summary:
-      //    recursion find LayerInof in subLayerInfos.
+      //    recursively find LayerInof from all subLayerInfos.
       // description:
       //    return null if does not find.
       var layerInfo = null;
@@ -163,7 +202,7 @@ SpatialReference, webMercatorUtils) {
       // implemented by sub class.
     },
 
-    setSubLayerVisible: function(subLayerId, visible) {
+    _setSubLayerVisible: function(subLayerId, visible) {
       /*jshint unused: false*/
       // implemented by sub class.
     },
@@ -172,39 +211,39 @@ SpatialReference, webMercatorUtils) {
       // implemented by sub class.
     },
 
-    _resetLayerObjectVisiblityBeforeInit: function() {
+    _resetLayerObjectVisiblity: function(/*layerOptions*/) {
       // implemented by sub class.
       // Does not do anything by default.
     },
 
-    // options = {
     // layerOptions: {
     //  id: {
     //        visible: true/false
     //      }
     //  }
-    // }
-    resetLayerObjectVisibility: function(options) {
-      if(this.isRootLayer) {
-        this._layerOptions = options.layerOptions ? options.layerOptions: null;
-        //this._layerOption  = options.layerOptions ? options.layerOptions[this.id]: null;
-        this.traversal(function(layerInfos) {
-          layerInfos._layerOption =
-                options.layerOptions ? options.layerOptions[layerInfos.id]: null;
-        });
-        if(this._layerOption !== undefined) {
-          this._resetLayerObjectVisiblityBeforeInit();
-        }
+    resetLayerObjectVisibility: function(layerOptions) {
+      //dos not have the capability to reset visiblility for sublayers.
+      var layerOption  = layerOptions ? layerOptions[this.id]: null;
+      if(this.isRootLayer() && layerOption) {
+        this._resetLayerObjectVisiblity(layerOptions);
       }
     },
 
-    initVisible: function() {
+    _initVisible: function() {
       // implemented by sub class.
     },
 
     // about layer visible.
     isVisible: function() {
       return this._visible ? true : false;
+    },
+
+    show: function() {
+      this._setTopLayerVisible(true);
+    },
+
+    hide: function() {
+      this._setTopLayerVisible(false);
     },
 
     //about layer indexes
@@ -291,38 +330,44 @@ SpatialReference, webMercatorUtils) {
     },*/
 
 
-    _isShowInMapChanged: function(oldIsShowInMap) {
-      // summary:
-      //   Judge is show in map changed after contorl from layerInfo.
-      // description:
-      //   paramerter:
-      //     oldIsShowInMap
-      //   result:
-      //     publish 'isShowInMapChanged' event with all changed layers, if
-      //     current layer is changed.
-      //     all sublayer will changed if current layer is changed.
+    _isShowInMapChanged: function() {
+      var showInMapChanged = false;
       var newIsShowInMap = this.isShowInMap();
-      if (oldIsShowInMap === newIsShowInMap) {
-        return;
-      } else if(newIsShowInMap === false) {
+      if(newIsShowInMap === false) {
         //hide map's popup.
         this.map.infoWindow.hide();
       }
+      if (this._oldIsShowInMap !== newIsShowInMap) {
+        // update _oldIsShowInMap
+        this._oldIsShowInMap = newIsShowInMap;
+        showInMapChanged = true;
+      }
+      return showInMapChanged;
+    },
+
+    _isShowInMapChanged2: function() {
+      // summary:
+      //   Judge is show in map changed after contorl from layerInfo.
+      // description:
+      //   result:
+      //     publish 'isShowInMapChanged' event with all changed layerInfos
       var changedLayerInfos = [];
       this.traversal(function(layerInfo) {
-        changedLayerInfos.push(layerInfo);
+        if(layerInfo._isShowInMapChanged()) {
+          changedLayerInfos.push(layerInfo);
+        }
       });
       topic.publish('layerInfos/layerInfo/isShowInMapChanged', changedLayerInfos);
     },
 
+    /*
     _isShowInMapChanged2: function() {
+      // summary:
+      //   Judge is show in map changed after contorl from layerInfo.
+      // description:
+      //   result:
+      //     publish 'isShowInMapChanged' event with all changed layerInfos
       var newIsShowInMap = this.isShowInMap();
-      // if (this._oldIsShowInMap === newIsShowInMap) {
-      //   return;
-      // } else if(newIsShowInMap === false) {
-      //   //hide map's popup.
-      //   this.map.infoWindow.hide();
-      // }
 
       if(newIsShowInMap === false) {
         //hide map's popup.
@@ -338,10 +383,28 @@ SpatialReference, webMercatorUtils) {
         subLayerInfo._isShowInMapChanged2();
       });
     },
+    */
 
     _visibleChanged: function() {
       var changedLayerInfos = [this];
       topic.publish('layerInfos/layerInfo/visibleChanged', changedLayerInfos);
+    },
+
+    _initSubLayerInfoIndex: function() {
+      var subLayerInfoIndex = {};
+      // for rootLayer only
+      if(this.isRootLayer()) {
+        this.traversal(function(subLayerInfo) {
+          if(!subLayerInfo.isRootLayer()) {
+            subLayerInfoIndex[subLayerInfo.subId] = subLayerInfo;
+          }
+        });
+      }
+      this._subLayerInfoIndex = subLayerInfoIndex;
+    },
+
+    _getLayerInfosObj: function() {
+      return this._layerInfos;
     },
 
     // new section--------------------------------------------------------------------
@@ -371,13 +434,6 @@ SpatialReference, webMercatorUtils) {
       return layerTypesOfSupportTable;
     },
 
-    // return itemId if the layer is added from an item of Portal.
-    // there is _itemId attribute of LayerObject which is added by widget's
-    // result(such as Analysis)
-    _isItemLayer: function() {
-      return this.originOperLayer.itemId || this.layerObject._itemId;
-    },
-
     _getShowLegendOfWebmap: function() {
       // summary:
       //   get setting of showLegend from webmap defination.
@@ -386,15 +442,56 @@ SpatialReference, webMercatorUtils) {
       return this.originOperLayer.showLegend !== undefined ?
              this.originOperLayer.showLegend : true;
     },
+
+    _needToRenew: function() {
+      return false;
+    },
+
+    /***************************************************
+     * methods for control service definition
+     ***************************************************/
+
+    _getServiceDefinition: function() {
+      var def = new Deferred();
+      def.resolve(null);
+      return def;
+    },
+
+    _serviceDefinitionRequest: function(url) {
+      return this._normalRequest(url, {f: 'json'}, 'json');
+    },
+
+    // publicInterFace
+    getServiceDefinition: function() {
+      return this._getServiceDefinition();
+    },
+
+    /***************************************************
+     * methods for requests
+     ***************************************************/
+    _normalRequest: function(url, content, handleAs) {
+      var request = esriRequest({
+        url: url,
+        content: content,
+        handleAs: handleAs,
+        callbackParamName: 'callback'
+      });
+      return request;
+    },
+
     //--------------public interface---------------------------
     getLayerObject: function() {
       var def = new Deferred();
       if (this.layerObject) {
         def.resolve(this.layerObject);
       } else {
-        def.reject("layerObject is null");
+        def.resolve(null);
       }
       return def;
+    },
+
+    getLayerObjectTryUsingFeatureService: function() {
+      return this.getLayerObject();
     },
 
     getSubLayers: function() {
@@ -417,6 +514,26 @@ SpatialReference, webMercatorUtils) {
       }
     },
 
+    // root layerInfo's level is 0;
+    getLayerLevel: function() {
+      var level = 0;
+      var currentLayerInfo = this;
+      while(currentLayerInfo.parentLayerInfo) {
+        level++;
+        currentLayerInfo = currentLayerInfo.parentLayerInfo;
+      }
+      return level;
+    },
+
+    getRootLayerInfo: function() {
+      var rootLayerInfo = this;
+      while(rootLayerInfo.parentLayerInfo) {
+        rootLayerInfo = rootLayerInfo.parentLayerInfo;
+      }
+
+      return rootLayerInfo;
+    },
+
     isShowInMap: function() {
       var isShow = true;
       var currentLayerInfo = this;
@@ -436,13 +553,34 @@ SpatialReference, webMercatorUtils) {
       return def;
     },
 
-    // now it is used for Attribute.
+    // getPopupInfoFromWebmap
     getPopupInfo: function() {
       // summary:
       //   get popupInfo from webmap defination.
       // description:
       //   return null directly if the has not configured popupInfo in webmap.
       return this.originOperLayer.popupInfo;
+    },
+
+    getPopupInfoFromLayerObject: function() {
+      var infoTemplate = this.getInfoTemplate();
+      var popupInfo = null;
+      if(infoTemplate) {
+        popupInfo = infoTemplate.info;
+      }
+      return popupInfo;
+    },
+
+    loadPopupInfo: function() {
+      var def = new Deferred();
+      this.loadInfoTemplate().then(lang.hitch(this, function(infoTemplate) {
+        var popupInfo = null;
+        if(infoTemplate) {
+          popupInfo = infoTemplate.info;
+        }
+        def.resolve(popupInfo);
+      }));
+      return def;
     },
 
     loadInfoTemplate: function() {
@@ -469,10 +607,31 @@ SpatialReference, webMercatorUtils) {
       // summary:
       //   get filter from webmap defination.
       // description:
-      //   return null directly if has not configured filter in webmap.
+      //   return null directly if filter has not been configured in webmap.
       return this.originOperLayer.layerDefinition ?
              this.originOperLayer.layerDefinition.definitionExpression :
              null;
+    },
+
+    getFilter: function() {
+      // summary:
+      //   get filter from layerObject.
+      // description:
+      //   return null if it does not have or cannot get it.
+      // implemented by sub class.
+      return null;
+    },
+
+    setFilter: function(/*layerDefinitionExpression*/) {
+      // summary:
+      //   set layer definition expression to layerObject.
+      // paramtter
+      //   layerDefinitionExpression: layer definition expression
+      //   set 'null' to delete layer definition expression
+      // description:
+      //   operation will skip layer if it does not support filter.
+      // implemented by sub class.
+      // Todo... consider tableInfo, should return a def.
     },
 
     getShowLegendOfWebmap: function() {
@@ -490,7 +649,7 @@ SpatialReference, webMercatorUtils) {
     },
 
     getUrl: function() {
-      return this.layerObject.url;
+      return this.layerObject.url || this.layerObject._url;
     },
 
     // search types on all sublayers by recursion
@@ -544,7 +703,14 @@ SpatialReference, webMercatorUtils) {
       return def;
     },
 
-    getRelatedTableInfoArray: function() {
+    // summary:
+    //   get related tableInfo array
+    // parameters:
+    //   relationshipRole: optional
+    //       "esriRelRoleOrigin"
+    //       "esriRelRoleDestination"
+    getRelatedTableInfoArray: function(relationshipRole) {
+      /*jshint unused: false*/
       var def = new Deferred();
       def.resolve([]);
       return def;
@@ -555,27 +721,48 @@ SpatialReference, webMercatorUtils) {
       array.forEach(this.newSubLayers, function(subLayerInfo) {
         if(subLayerInfo.id !== id) {
           tempSubLayerInfos.push(subLayerInfo);
+        } else {
+          subLayerInfo.destroy();
         }
       });
       this.newSubLayers = tempSubLayerInfos;
     },
 
-    destroy: function() {
+    releaseResource: function() {
       array.forEach(this._eventHandles, function(eventHandle) {
         eventHandle.remove();
       });
+      // destroy labelLayer and relatedLabelLayer
+      this.destroyLabelLayer();
+      // destroy layerInfo adaptor
+      if(this._adaptor) {
+        this._adaptor.destroy();
+      }
+    },
+
+    destroy: function() {
+      // After root traversal for destroy.
+      array.forEach(this.newSubLayers, function(subLayerInfo) {
+        subLayerInfo.destroy();
+      });
+      this.releaseResource();
       this.inherited(arguments);
     },
 
-    destroyLayerInfo: function() {
-      // After root traversal for destroy.
+    update: function() {
+      // destory all subLayerInfos
       array.forEach(this.newSubLayers, function(subLayerInfo) {
-        subLayerInfo.destroyLayerInfo();
+        subLayerInfo.destroy();
       });
-      this.destroy();
+      // release releaseResource
+      this.releaseResource();
+      // init
+      this.init();
     },
 
     isMapNotesLayerInfo: function() {
+      // summary:
+      //    is map notes layerInfo means that layerInfo is root of map notes.
       var isMapNotesLayerInfo;
       if (this.originOperLayer.featureCollection &&
         this.id.indexOf("mapNotes_") === 0 &&
@@ -588,27 +775,346 @@ SpatialReference, webMercatorUtils) {
       return isMapNotesLayerInfo;
     },
 
+    getScaleRange: function() {
+      var scaleRange;
+      if(this.layerObject &&
+         (this.layerObject.minScale >= 0) &&
+         (this.layerObject.maxScale >= 0)) {
+        scaleRange = {
+          minScale: this.layerObject.minScale,
+          maxScale: this.layerObject.maxScale
+        };
+      } else {
+        scaleRange = {
+          minScale: 0,
+          maxScale: 0
+        };
+      }
+      return scaleRange;
+    },
+
+    isCurrentScaleInTheScaleRange: function() {
+      var scaleRange = this.getScaleRange();
+      var mapScale = this.map.getScale();
+      var isInTheScaleRange;
+      if((scaleRange.minScale === 0) && (scaleRange.maxScale === 0)) {
+        isInTheScaleRange = true;
+      } else {
+        if((scaleRange.minScale === 0 ? true : scaleRange.minScale > mapScale) &&
+           (scaleRange.maxScale === 0 ? true : mapScale > scaleRange.maxScale)) {
+          isInTheScaleRange = true;
+        } else {
+          isInTheScaleRange = false;
+        }
+      }
+      return isInTheScaleRange;
+    },
+
+    isInScale: function() {
+      var isInScale = true;
+      var currentLayerInfo = this;
+      while(currentLayerInfo) {
+        isInScale = currentLayerInfo.isCurrentScaleInTheScaleRange();
+        currentLayerInfo = currentLayerInfo.parentLayerInfo;
+        if(!isInScale) {
+          break;
+        }
+      }
+      return isInScale;
+    },
+
+    enablePopup: function() {
+      // implemented by sub class.
+    },
+
+    disablePopup: function() {
+      // implemented by sub class.
+    },
+
+    isPopupEnabled: function() {
+      // implemented by sub class.
+      // default reture false;
+      return false;
+    },
+
+
+    // summary:
+    //   get capabilities that defined in the webmap
+    // descriptors:
+    //   return null if no capabilities.
+    getCapabilitiesOfWebMap: function() {
+      return this.originOperLayer.capabilities;
+    },
+
+    // returns basicItemInfo if the layer is added from an item of Portal.
+    // there is _wabProperties.itemInfo attribute of LayerObject which is added by widget's
+    // result (such as Analysis)
+    isItemLayer: function() {
+      return this._getBasicItemInfo();
+    },
+
+    // basicItemInfo = {
+    //   portalUrl:
+    //   itemId:
+    // }
+    _getBasicItemInfo: function() {
+      var basicItemInfo = null;
+      var rootLayerInfo = this.getRootLayerInfo();
+      var appConfig = window.appConfig || window.getAppConfig();
+      var itemLayerInfoInLayerObject = lang.getObject("_wabProperties.itemLayerInfo", false, rootLayerInfo.layerObject);
+      if(rootLayerInfo.originOperLayer.itemId) {
+        basicItemInfo = {};
+        basicItemInfo.itemId = rootLayerInfo.originOperLayer.itemId;
+        basicItemInfo.portalUrl = portalUrlUtils.getStandardPortalUrl(appConfig.map.portalUrl || appConfig.portalUrl);
+      } else if(itemLayerInfoInLayerObject &&
+                itemLayerInfoInLayerObject.portalUrl &&
+                itemLayerInfoInLayerObject.itemId){
+        basicItemInfo = {};
+        basicItemInfo.itemId = itemLayerInfoInLayerObject.itemId;
+        basicItemInfo.portalUrl = portalUrlUtils.getStandardPortalUrl(itemLayerInfoInLayerObject.portalUrl);
+      }
+      return basicItemInfo;
+    },
+
+    getItemInfo: function() {
+      // summary:
+      //   get itemInfo by asyn.
+      // description:
+      //   return a itemInfo object.
+      //   return null if layer is not a itemLayer.
+      var itemInfoDef = new Deferred();
+      var rootLayerInfo = this.getRootLayerInfo();
+      if(rootLayerInfo.isItemLayer()) {
+        if(!rootLayerInfo._itemInfo) {
+          rootLayerInfo._itemInfo = new clazz.ItemInfo(this, rootLayerInfo);
+        }
+        rootLayerInfo._itemInfo.onLoad().then(lang.hitch(this, function() {
+          itemInfoDef.resolve(rootLayerInfo._itemInfo);
+        }), lang.hitch(this, function() {
+          itemInfoDef.resolve(null);
+        }));
+      } else {
+        itemInfoDef.resolve(null);
+      }
+      return itemInfoDef;
+    },
+
+    isHostedService: function() {
+      var def = new Deferred();
+      this._getServiceDefinition().then(lang.hitch(this, function(serviceDefinition) {
+        var isHostedService;
+        if(serviceDefinition && serviceDefinition.serviceItemId) {
+          isHostedService = true;
+        } else {
+          isHostedService = false;
+        }
+        def.resolve(isHostedService);
+      }));
+
+      return def;
+    },
+
+    isHostedLayer: function() {
+      var def;
+      if(this.isItemLayer()) {
+        def = this.isHostedService();
+      } else {
+        def = new Deferred();
+        def.resolve(false);
+      }
+
+      return def;
+    },
+
+    // control labels
+    obtainLabelControl: function() {
+      // implemented by sub class.
+    },
+
+    restoreLabelControl: function() {
+      // implemented by sub class.
+    },
+
+    destroyRealtedLabelLayer: function() {
+      // implemented by sub class.
+    },
+
+    destroyLabelLayer: function() {
+      // implemented by sub class.
+    },
+
+    canShowLabel: function() {
+      // implemented by sub class.
+    },
+
+    isShowLabels: function() {
+      // implemented by sub class.
+    },
+
+    showLabels: function() {
+      // implemented by sub class.
+    },
+
+    hideLabels: function() {
+      // implemented by sub class.
+    },
+
     /****************
      * Event
      ***************/
+    emitEvent: function() {
+      try {
+        this.emit.apply(this, arguments);
+        if(this._adaptor) {
+          this._adaptor.emitEvent.apply(this._adaptor, arguments);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    },
+
     _bindEvent: function() {
+      var handle;
       if(this.layerObject && !this.layerObject.empty) {
-        var handle = this.layerObject.on('visibility-change',
+        // bind visibilit-change event
+        handle = this.layerObject.on('visibility-change',
                                      lang.hitch(this, this._onVisibilityChanged));
         this._eventHandles.push(handle);
+
+        // bind filter change event
+        handle = aspect.after(this.layerObject,
+                               'setDefinitionExpression',
+                               lang.hitch(this, this._onFilterChanged));
+        this._eventHandles.push(handle);
+
+        // setRenderer event, just for the layer that has 'setRenderer' method.
+        handle = aspect.after(this.layerObject,
+                              'setRenderer',
+                              lang.hitch(this, this._onRendererChanged));
+        this._eventHandles.push(handle);
+
+        // bind opacity-change event, just for root layer.
+        if(this.isRootLayer()) {
+          handle = this.layerObject.on('opacity-change',
+                                       lang.hitch(this, this._onOpacityChanged));
+          this._eventHandles.push(handle);
+        }
       }
     },
 
     _onVisibilityChanged: function() {
       //var oldVisible = this._visible;
       // updte visible
-      this.initVisible();
+      this._initVisible();
 
       // send event
       this._visibleChanged();
       //_isShowInMapChanged2 is dependent on _visible,
-      // so muse update _visible(useing this.initVisible) at before
+      // so muse update _visible(useing this._initVisible) at before
       this._isShowInMapChanged2();
+    },
+
+    _onFilterChanged: function() {
+      var oldFilter = this._oldFilter ? this._oldFilter : null;
+      var currentFilter = this.layerObject.getDefinitionExpression();
+      currentFilter = currentFilter ? currentFilter : null;
+
+      if(oldFilter !== currentFilter) {
+        topic.publish('layerInfos/layerInfo/filterChanged', [this]);
+        // update old layerDefinitions
+        this._oldFilter = currentFilter;
+      }
+    },
+
+    _onRendererChanged: function() {
+      var changedLayerInfos = [this];
+      topic.publish('layerInfos/layerInfo/rendererChanged', changedLayerInfos);
+    },
+
+    _onOpacityChanged: function() {
+      var changedLayerInfos = [this];
+      topic.publish('layerInfos/layerInfo/opacityChanged', changedLayerInfos);
     }
+
   });
+
+  clazz.ItemInfo = declare(null, {
+    _currentLayerInfo:  null,
+    _rootLayerInfo:     null,
+    _portalUrl:         null,
+    _itemId:            null,
+    _item:              null,
+    _itemData:          null,
+    _serviceDefinition: null,
+    _itemInfoLoadedDef: null,
+
+    constructor: function(currentLayerInfo, rootLayerInfo) {
+      this._currentLayerInfo = currentLayerInfo;
+      this._rootLayerInfo    = rootLayerInfo;
+      this._loadResource();
+    },
+
+    _loadResource: function() {
+      this._itemInfoLoadedDef = new Deferred();
+      var basicItemInfo = this._rootLayerInfo.isItemLayer();
+      if(basicItemInfo) {
+        this._portalUrl = basicItemInfo.portalUrl;
+        this._itemId = basicItemInfo.itemId;
+        var portal = portalUtils.getPortal(this._portalUrl);
+        var itemDef = portal.getItemById(this._itemId);
+        var itemDataDef = portal.getItemData(this._itemId);
+        var serviceDefinitionDef = this._currentLayerInfo._getServiceDefinition();
+        all({
+          item: itemDef,
+          itemData: itemDataDef,
+          serviceDefinition: serviceDefinitionDef
+        }).then(lang.hitch(this, function(result) {
+          this._item = result.item;
+          this._itemData = result.itemData;
+          this._serviceDefinition = result.serviceDefinition;
+          this._itemInfoLoadedDef.resolve(this);
+        }), lang.hitch(this, function(error) {
+          if(error && error.message) {
+            console.log(error.message);
+          }
+          this._itemInfoLoadedDef.reject();
+        }));
+      } else {
+        this._itemInfoLoadedDef.reject();
+      }
+    },
+
+    onLoad: function() {
+      return this._itemInfoLoadedDef;
+    },
+
+    getPortalUrl: function() {
+      return this._portalUrl;
+    },
+
+    getItemId: function() {
+      return this._itemId;
+    },
+
+    getItem: function() {
+      return this._item;
+    },
+
+    getItemData: function() {
+      return this._itemData;
+    },
+
+    isHostedLayer: function() {
+      var isHostedLayer;
+      if(this._serviceDefinition && this._serviceDefinition.serviceItemId) {
+        isHostedLayer = true;
+      } else {
+        isHostedLayer = false;
+      }
+      return isHostedLayer;
+    }
+
+  });
+
+  return clazz;
 });

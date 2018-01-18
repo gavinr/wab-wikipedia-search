@@ -29,20 +29,8 @@
   color: #f3cfd5;
 }
 
-.jimu-widget-header-controller .links .jimu-link{
-  color: #f3cfd5;
-}
-
-.jimu-widget-header-controller .signin-section .jimu-link{
-  color: #fcc931;
-}
-
 .jimu-widget-header-controller .icon-node{
   border-right: 1px solid #881328;
-}
-
-.jimu-widget-header-controller .icon-node.jimu-state-selected{
-  background-color: #881328 !important;
 }
 
 .esriPopup .titlePane {
