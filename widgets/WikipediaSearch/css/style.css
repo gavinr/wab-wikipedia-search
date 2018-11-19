@@ -1,0 +1,12 @@
+.wikipedia-search h3 {
+  font-size: 1.2em; }
+
+.wikipedia-search h3, .wikipedia-search p {
+  margin-top: 0; }
+
+.wikipedia-search .resultsArea {
+  margin: 10px 0; }
+
+/* add additional custom styles */
+
+/*# sourceMappingURL=style.css.map */
