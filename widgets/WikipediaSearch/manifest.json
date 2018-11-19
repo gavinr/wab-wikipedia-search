@@ -1,17 +1,24 @@
 {
   "name": "WikipediaSearch",
+  "2D": true,
+  "3D": false,
   "platform": "HTML",
-  "version": "2.0.0",
-  "wabVersion": "2.7",
+  "version": "2.1.0",
+  "wabVersion": "2.9",
   "author": "Gavin Rehkemper",
-  "description": "Web AppBuilder widget that allows the user to find articles on Wikipedia that are near a particular location.",
-  "copyright": "Gavin Rehkemper 2018",
-  "license": "ISC",
+  "description": "A widget that allows the user to map articles that are found via a keyword search.",
+  "copyright": "",
+  "license": "MIT",
   "properties": {
-    "hasConfig": false,
-    "hasStyle": true,
+    "inPanel": true,
     "hasLocale": true,
+    "hasStyle": true,
+    "hasConfig": false,
     "hasUIFile": true,
-    "hasSettingPage": false
+    "hasSettingPage": false,
+    "hasSettingUIFile": false,
+    "hasSettingLocale": false,
+    "hasSettingStyle": false,
+    "IsController": false
   }
 }

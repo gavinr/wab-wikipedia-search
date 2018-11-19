@@ -1,38 +1,35 @@
 {
   "name": "wab-wikipedia-search",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "A Web AppBuilder widget that allows the user to map articles that are found via a keyword search.",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/gavinr/wab-wikipedia-search.git"
-  },
+  "repository": "https://github.com/gavinr/wab-wikipedia-search.git",
   "keywords": [
-    "web",
-    "appbuilder",
+    "web-appbuilder",
     "wab",
     "wikipedia",
     "arcgis"
   ],
   "author": "Gavin Rehkemper",
-  "license": "ISC",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/gavinr/wab-wikipedia-search/issues"
   },
-  "homepage": "https://github.com/gavinr/wab-wikipedia-search#readme",
+  "scripts": {
+    "build": "esri-wab-build C:/code/arcgis-web-appbuilder-2.10/WebAppBuilderForArcGIS/server/apps/2"
+  },
   "devDependencies": {
+    "babel-core": "^6.26.3",
     "babel-plugin-transform-es2015-modules-simple-amd": "^0.3.0",
-    "babel-preset-es2015-without-strict": "0.0.2",
-    "babel-preset-stage-0": "^6.5.0",
-    "grunt": "^1.0.1",
-    "grunt-babel": "^6.0.0",
-    "grunt-contrib-clean": "^1.0.0",
+    "babel-preset-es2015-without-strict": "0.0.4",
+    "babel-preset-stage-0": "^6.24.1",
+    "esri-wab-build": "^1.0.1",
+    "grunt": "^1.0.3",
+    "grunt-babel": "^7.0.0",
+    "grunt-contrib-clean": "^2.0.0",
     "grunt-contrib-copy": "^1.0.0",
-    "grunt-contrib-watch": "^1.0.0",
-    "grunt-gh-pages": "^1.1.0",
-    "grunt-sync": "^0.5.2"
+    "grunt-contrib-watch": "^1.1.0",
+    "grunt-sass": "^3.0.2",
+    "grunt-sync": "^0.8.0",
+    "node-sass": "^4.9.3"
   }
 }

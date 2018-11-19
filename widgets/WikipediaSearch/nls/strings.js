@@ -1,7 +1,9 @@
 define({
   root: {
     _widgetLabel: 'Wikipedia Search',
-    description: 'Web AppBuilder widget that allows the user to find articles on Wikipedia that are near a particular location.'
+    widgetTitle: 'Wikipedia Search',
+    description: 'A widget that allows the user to map articles that are found via a keyword search.',
+    viewOnWikipedia: 'View on Wikipedia'
   }
   // add supported locales below:
   // , "zh-cn": true

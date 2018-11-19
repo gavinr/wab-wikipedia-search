@@ -23,28 +23,18 @@ export default declare([BaseWidget, _WidgetsInTemplateMixin], {
 
   baseClass: 'wikipedia-search',
 
-  postCreate() {
-    this.inherited(arguments);
-    console.log('WikipediaSearch::postCreate');
-  },
+  formSubmit(evt) {
+    evt.preventDefault();
+    evt.stopPropagation();
 
-  searchButtonOnClick() {
     this.clearGraphicsLayer();
     this.wikipediaSearch(this.queryText.get('value')).then((searchResults) => {
       // get coords
       this.getCoordsForArray(searchResults[1]).then((locationResults) => {
-        this.mapLocations(locationResults.query.pages);
-        this.searchButton.cancel();
+        this.mapLocations(locationResults);
         this.zoomToCurrentGraphics();
       });
     });
-  },
-
-  searchOnKeyUpHandler(evt) {
-    if (evt.keyCode === 13) {
-      this.searchButton.makeBusy();
-      this.searchButtonOnClick();
-    }
   },
 
   wikipediaSearch(searchQuery) {
@@ -53,7 +43,7 @@ export default declare([BaseWidget, _WidgetsInTemplateMixin], {
       content: {
         'action': 'opensearch',
         'search': searchQuery,
-        'limit': '20',
+        'limit': '50',
         'namespace': '0',
         'format': 'json'
       }
@@ -62,15 +52,41 @@ export default declare([BaseWidget, _WidgetsInTemplateMixin], {
   },
 
   getCoordsForArray(namesArr) {
+    return new Promise((resolve, reject) => {
+      // do 20 at a time due to API limits:
+      let i = 0;
+      let j = 0;
+      let promises = [];
+      let chunk = 20;
+      for(i=0,j=namesArr.length; i<j; i+=chunk) {
+        promises.push(this._getCoordsForArray(namesArr.slice(i, i+chunk)));
+      }
+      
+      Promise.all(promises).then((results) => {
+        // normalize
+        const mergedResults = results.reduce((accumulator, currentValue) => {
+          return Object.assign(accumulator, currentValue.query.pages);
+        }, {});
+        resolve(mergedResults);
+      });
+    });
+
+    
+  },
+
+  _getCoordsForArray(namesArr) {
     var req = {
       url: 'https://en.wikipedia.org/w/api.php',
       content: {
         'action': 'query',
-        'prop': 'coordinates',
+        'prop': 'info|coordinates|extracts',
         'titles': namesArr.join('|'),
-        'colimit': '10',
+        'colimit': '20',
         'coprop': 'type|name|dim|country|region|globe',
-        'format': 'json'
+        'format': 'json',
+        'inprop': 'url',
+        'exintro': '1',
+        'exsentences': '3'
       }
     };
     return esriRequest(req);
@@ -82,11 +98,11 @@ export default declare([BaseWidget, _WidgetsInTemplateMixin], {
       if (locations[prop].hasOwnProperty('coordinates')) {
         atLeastOneLocationPoint = true;
         var pt = new Point(locations[prop].coordinates[0].lon, locations[prop].coordinates[0].lat);
-        this.addGraphic(pt, locations[prop].title);
+        this.addGraphic(pt, locations[prop].title, locations[prop].fullurl, locations[prop].extract);
       }
     }
     if (atLeastOneLocationPoint) {
-      this.setResultText(this.getGraphicsLayer().graphics.length + ' point(s) found');
+      this.setResultText(this.getGraphicsLayer().graphics.length + ' locations(s) found');
     } else {
       this.setResultText('No locations found.');
     }
@@ -96,15 +112,38 @@ export default declare([BaseWidget, _WidgetsInTemplateMixin], {
     html.set(this.resultsArea, resultText);
   },
 
-  addGraphic(geom, title) {
+  addGraphic(geom, title, url, extract) {
     var gl = this.getGraphicsLayer();
     var symbol = new SimpleMarkerSymbol(SimpleMarkerSymbol.STYLE_CIRCLE, 20,
       new SimpleLineSymbol(SimpleLineSymbol.STYLE_SOLID,
         new Color([255, 0, 0]), 1),
       new Color([0, 255, 0, 0.25]));
+
+    // shorten the extract to ~500 characters
+    let short = '';
+    if(extract) {
+      short = extract;
+    } else {
+      console.log('no extract?');
+    }
+
+    const template = new InfoTemplate({
+      title: '${name}'
+    });
+
+    template.setContent(
+      (info) => {
+        let retString = ``;
+        if(short && short !== '') {
+          retString = `${retString}${short}<br /><br />`;
+        }
+        return `${retString}<a href="${url}" target="_blank">${this.nls.viewOnWikipedia}</a>`;
+      }
+    )
+
     gl.add(new Graphic(geom, symbol, {
       name: title
-    }, new InfoTemplate('Attributes', '${*}')));
+    }, template));
   },
 
   getGraphicsLayer() {

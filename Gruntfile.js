@@ -5,9 +5,11 @@ module.exports = function (grunt) {
     grunt.loadNpmTasks('grunt-contrib-copy');
     grunt.loadNpmTasks('grunt-contrib-clean');
     grunt.loadNpmTasks('grunt-babel');
-    grunt.loadNpmTasks('grunt-gh-pages');
-    var appDir = 'C:/code/WebAppBuilderForArcGIS/server/apps/2';
-    var stemappDir = 'C:/code/WebAppBuilderForArcGIS/client/stemapp';
+    grunt.loadNpmTasks('grunt-sass');
+    grunt.loadNpmTasks('node-sass');
+    const sass = require('node-sass');
+    var appDir = 'C:/code/arcgis-web-appbuilder-2.10/WebAppBuilderForArcGIS/server/apps/2';
+    var stemappDir = 'C:/code/arcgis-web-appbuilder-2.10/WebAppBuilderForArcGIS/client/stemapp';
     grunt.initConfig({
         sync: {
             main: {
@@ -27,6 +29,7 @@ module.exports = function (grunt) {
             }
         },
         babel: {
+            'options': { 'sourceMap': true },
             'main': {
                 'files': [{
                         'expand': true,
@@ -45,20 +48,22 @@ module.exports = function (grunt) {
             }
         },
         watch: {
-            'main': {
-                'files': [
+            main: {
+                files: [
                     'widgets/**',
                     'themes/**'
                 ],
-                'tasks': [
+                tasks: [
                     'clean',
+                    'sass',
                     'babel',
                     'copy',
                     'sync'
                 ],
-                'options': {
-                    'spawn': false,
-                    'atBegin': true
+                options: {
+                    spawn: false,
+                    atBegin: true,
+                    livereload: true
                 }
             }
         },
@@ -80,15 +85,22 @@ module.exports = function (grunt) {
                 'expand': true
             }
         },
-        clean: { 'dist': { 'src': 'dist/**' } },
-        'gh-pages': {
-          options: {
-            base: 'demo',
-            dotfiles: true
-          },
-          src: ['**']
+        clean: { 'dist': { 'src': 'dist/*' } },
+        sass: {
+            dist: {
+                options: {
+                    implementation: sass,
+                    sourceMap: true
+                },
+                files: [{
+                        expand: true,
+                        src: ['widgets/**/*.scss'],
+                        rename: function (dest, src) {
+                            return src.replace('scss', 'css');
+                        }
+                    }]
+            }
         }
     });
     grunt.registerTask('default', ['watch']);
-    grunt.registerTask('deploy', ['gh-pages']);
 };
